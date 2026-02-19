@@ -1,11 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Truck, Shield, LayoutDashboard } from 'lucide-react';
 import OwnerDashboard from './components/OwnerDashboard';
 import AdminPanel from './components/AdminPanel';
 import { AppMode } from './types';
+import { triggerSamsaraSync } from './services/backendService';
+
+const SYNC_INTERVAL_MS = 60_000; // sync Samsara every 60 seconds
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.OWNER);
+
+  // Background sync — runs on mount and every 60s regardless of active tab
+  useEffect(() => {
+    triggerSamsaraSync();
+    const interval = setInterval(triggerSamsaraSync, SYNC_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   const NavButton = ({ targetMode, icon: Icon, label }: { targetMode: AppMode; icon: any; label: string }) => (
     <button
