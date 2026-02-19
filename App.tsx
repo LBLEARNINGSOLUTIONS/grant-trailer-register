@@ -1,19 +1,18 @@
 import React, { useState } from 'react';
 import { Truck, Shield, LayoutDashboard } from 'lucide-react';
-import DriverView from './components/DriverView';
 import OwnerDashboard from './components/OwnerDashboard';
 import AdminPanel from './components/AdminPanel';
 import { AppMode } from './types';
 
 const App: React.FC = () => {
-  const [mode, setMode] = useState<AppMode>(AppMode.DRIVER);
+  const [mode, setMode] = useState<AppMode>(AppMode.OWNER);
 
   const NavButton = ({ targetMode, icon: Icon, label }: { targetMode: AppMode; icon: any; label: string }) => (
     <button
       onClick={() => setMode(targetMode)}
       className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all ${
-        mode === targetMode 
-          ? 'text-blue-600 bg-blue-50 font-bold' 
+        mode === targetMode
+          ? 'text-blue-600 bg-blue-50 font-bold'
           : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
       }`}
     >
@@ -35,22 +34,16 @@ const App: React.FC = () => {
             <p className="text-xs text-slate-400">Register System</p>
           </div>
         </div>
-        
+
         {/* Desktop Navigation (Hidden on Mobile) */}
         <nav className="hidden md:flex bg-slate-100 p-1 rounded-lg">
-          <button 
-            onClick={() => setMode(AppMode.DRIVER)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${mode === AppMode.DRIVER ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            Driver
-          </button>
-          <button 
+          <button
             onClick={() => setMode(AppMode.OWNER)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${mode === AppMode.OWNER ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
           >
             Owner
           </button>
-          <button 
+          <button
             onClick={() => setMode(AppMode.ADMIN)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${mode === AppMode.ADMIN ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
           >
@@ -61,14 +54,12 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden relative">
-        {mode === AppMode.DRIVER && <DriverView />}
         {mode === AppMode.OWNER && <OwnerDashboard />}
         {mode === AppMode.ADMIN && <AdminPanel />}
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden bg-white border-t border-slate-200 grid grid-cols-3 pb-6 pt-2 px-2 z-20">
-        <NavButton targetMode={AppMode.DRIVER} icon={Truck} label="Driver" />
+      <nav className="md:hidden bg-white border-t border-slate-200 grid grid-cols-2 pb-6 pt-2 px-2 z-20">
         <NavButton targetMode={AppMode.OWNER} icon={LayoutDashboard} label="Dashboard" />
         <NavButton targetMode={AppMode.ADMIN} icon={Shield} label="Admin" />
       </nav>

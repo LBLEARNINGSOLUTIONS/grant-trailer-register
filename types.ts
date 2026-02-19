@@ -1,5 +1,4 @@
 export enum AppMode {
-  DRIVER = 'DRIVER',
   OWNER = 'OWNER',
   ADMIN = 'ADMIN'
 }
