@@ -7,13 +7,15 @@ export default async function handler(req: any, res: any) {
 
   const url = new URL('https://api.samsara.com/form-submissions/stream');
 
+  // Forward all query params to Samsara generically
   const query = req.query as Record<string, string | string[]>;
-  if (query.after) url.searchParams.set('after', String(query.after));
-
-  const ids = Array.isArray(query.formTemplateIds)
-    ? query.formTemplateIds
-    : query.formTemplateIds ? [query.formTemplateIds] : [];
-  ids.forEach((id: string) => url.searchParams.append('formTemplateIds', id));
+  for (const [key, value] of Object.entries(query)) {
+    if (Array.isArray(value)) {
+      value.forEach(v => url.searchParams.append(key, v));
+    } else {
+      url.searchParams.set(key, value);
+    }
+  }
 
   try {
     const response = await fetch(url.toString(), {

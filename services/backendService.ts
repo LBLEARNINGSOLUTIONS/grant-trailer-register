@@ -316,7 +316,13 @@ async function syncSamsara() {
 
   const cursor = localStorage.getItem(STORAGE_KEY_CURSOR);
   const url = new URL('/api/samsara-proxy', window.location.origin);
-  if (cursor) url.searchParams.set('after', cursor);
+  if (cursor) {
+    url.searchParams.set('after', cursor);
+  } else {
+    // startTime required by Samsara stream endpoint on first request (no cursor)
+    const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+    url.searchParams.set('startTime', oneYearAgo);
+  }
   url.searchParams.append('formTemplateIds', DROP_TEMPLATE_UUID);
   url.searchParams.append('formTemplateIds', PICK_TEMPLATE_UUID);
 
@@ -336,6 +342,8 @@ async function syncSamsara() {
         // Stale or invalid cursor — clear it and restart from the beginning
         localStorage.removeItem(STORAGE_KEY_CURSOR);
         url.searchParams.delete('after');
+        const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+        url.searchParams.set('startTime', oneYearAgo);
         nextCursor = null;
         const retryResp = await fetch(url.toString());
         if (!retryResp.ok) throw new Error(`API Error: ${retryResp.statusText}`);
