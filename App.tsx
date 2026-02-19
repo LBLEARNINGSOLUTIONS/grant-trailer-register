@@ -2,15 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Truck, Shield, LayoutDashboard } from 'lucide-react';
 import OwnerDashboard from './components/OwnerDashboard';
 import AdminPanel from './components/AdminPanel';
+import FullScreenBoard from './components/FullScreenBoard';
 import { AppMode } from './types';
 import { triggerSamsaraSync } from './services/backendService';
 
-const SYNC_INTERVAL_MS = 60_000; // sync Samsara every 60 seconds
+const SYNC_INTERVAL_MS = 120_000; // sync Samsara every 2 minutes
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.OWNER);
 
-  // Background sync — runs on mount and every 60s regardless of active tab
+  // Background sync — runs on mount and every 2 minutes regardless of active tab
   useEffect(() => {
     triggerSamsaraSync();
     const interval = setInterval(triggerSamsaraSync, SYNC_INTERVAL_MS);
@@ -30,6 +31,11 @@ const App: React.FC = () => {
       <span className="text-xs">{label}</span>
     </button>
   );
+
+  // Full-screen board takes over the entire viewport
+  if (mode === AppMode.BOARD) {
+    return <FullScreenBoard onExit={() => setMode(AppMode.OWNER)} />;
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-50">
@@ -64,7 +70,7 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden relative">
-        {mode === AppMode.OWNER && <OwnerDashboard />}
+        {mode === AppMode.OWNER && <OwnerDashboard onFullScreen={() => setMode(AppMode.BOARD)} />}
         {mode === AppMode.ADMIN && <AdminPanel />}
       </main>
 

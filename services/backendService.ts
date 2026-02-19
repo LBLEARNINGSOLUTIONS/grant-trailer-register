@@ -1,5 +1,5 @@
-import { TrailerStatus, SyncLog, SamsaraFormSubmission } from '../types';
-import { MOCK_TRAILERS, DROP_TEMPLATE_UUID, PICK_TEMPLATE_UUID } from '../constants';
+import { TrailerStatus, SyncLog, SamsaraFormSubmission, DataIssue } from '../types';
+import { MOCK_TRAILERS, DROP_TEMPLATE_UUID, PICK_TEMPLATE_UUID, TRAILER_MASTER_LIST } from '../constants';
 
 interface SamsaraRawSubmission {
   id: string;
@@ -10,6 +10,9 @@ interface SamsaraRawSubmission {
   submittedAt?: string;
   condition?: string;
   notes?: string;
+  // Real Samsara API shape
+  inputs?: { label: string; value: string }[];
+  media?: { url: string; type?: string }[];
 }
 
 interface SamsaraStreamResponse {
@@ -20,22 +23,39 @@ interface SamsaraStreamResponse {
   };
 }
 
-const STORAGE_KEY_TRAILERS = 'grant_trailers_db'; // derived open-state (what Owner dashboard reads)
-const STORAGE_KEY_SUBMISSIONS = 'grant_samsara_submissions'; // raw-ish stream
+const STORAGE_KEY_TRAILERS = 'grant_trailers_db';
+const STORAGE_KEY_SUBMISSIONS = 'grant_samsara_submissions';
 const STORAGE_KEY_LOGS = 'grant_sync_logs';
 const STORAGE_KEY_OWNER_NOTIFIED = 'grant_owner_notified';
 const STORAGE_KEY_CURSOR = 'grant_samsara_cursor';
 
 const SAMSARA_API_TOKEN = import.meta.env.VITE_SAMSARA_API_TOKEN ?? '';
 
+// --- Samsara form input helpers ---
+
+function extractInput(inputs: { label: string; value: string }[] | undefined, label: string): string {
+  if (!inputs) return '';
+  const match = inputs.find(i => i.label.toLowerCase().includes(label.toLowerCase()));
+  return match?.value ?? '';
+}
+
+function extractPhotos(media: { url: string; type?: string }[] | undefined): string[] {
+  if (!media) return [];
+  return media.filter(m => !m.type || m.type === 'image').map(m => m.url);
+}
+
+function normalizeTrailerNumber(raw: string): string {
+  return raw.trim().toUpperCase().replace(/\s+/g, '-');
+}
+
+// --- DB bootstrap ---
+
 const initDB = () => {
   const existingSubs = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
   if (!existingSubs) {
-    // Bootstrap submissions from mock trailer state
     const bootSubmissions: SamsaraFormSubmission[] = [];
 
     MOCK_TRAILERS.forEach((t: any, idx: number) => {
-      // This mock dataset stores final state; derive submissions with sane ordering
       const baseDriver = t.droppedBy ?? t.pickedUpBy ?? `Driver ${idx + 1}`;
       const baseLocation = t.location ?? `Location ${idx + 1}`;
       const pickupAt = new Date(t.lastUpdated);
@@ -50,12 +70,15 @@ const initDB = () => {
           location: baseLocation,
           submittedAt: pickupAt.toISOString(),
           condition: t.condition ?? 'Good',
-          notes: t.notes ?? '',
+          notes: '',
+          customerName: t.customerName ?? '',
+          dropLocationDesc: t.dropLocationDesc ?? '',
+          defectLevel: t.defectLevel ?? 'No',
+          defectNotes: t.defectNotes ?? '',
+          photoUrls: [],
         });
       } else {
-        // If picked up, assume drop happened earlier
         const dropAt = new Date(pickupAt.getTime() - 2 * 60 * 60 * 1000);
-
         bootSubmissions.push(
           {
             id: `bootstrap-${t.id}-drop`,
@@ -66,7 +89,12 @@ const initDB = () => {
             location: baseLocation,
             submittedAt: dropAt.toISOString(),
             condition: t.condition ?? 'Good',
-            notes: t.notes ?? '',
+            notes: '',
+            customerName: t.customerName ?? '',
+            dropLocationDesc: '',
+            defectLevel: 'No',
+            defectNotes: '',
+            photoUrls: [],
           },
           {
             id: `bootstrap-${t.id}-pick`,
@@ -76,7 +104,9 @@ const initDB = () => {
             trailerNumber: t.id,
             location: baseLocation,
             submittedAt: pickupAt.toISOString(),
-            notes: t.notes ?? '',
+            notes: '',
+            customerName: t.customerName ?? '',
+            photoUrls: [],
           }
         );
       }
@@ -85,7 +115,6 @@ const initDB = () => {
     localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(bootSubmissions));
   }
 
-  // Always compute and write derived trailer state for the Owner dashboard
   updateDerivedOpenTrailers();
 };
 
@@ -100,62 +129,54 @@ const setSubmissions = (subs: SamsaraFormSubmission[]) => {
   updateDerivedOpenTrailers();
 };
 
-// Activity Feed Helpers
+// --- Activity Feed ---
+
 const getSubmissionsSortedDesc = (): SamsaraFormSubmission[] => {
   const subs = getSubmissions();
   return subs.slice().sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
 };
 
-export const getRecentSubmissions = (): SamsaraFormSubmission[] => {
-  return getSubmissionsSortedDesc();
-};
+export const getRecentSubmissions = (): SamsaraFormSubmission[] => getSubmissionsSortedDesc();
 
-export const getActivity = (limit = 25) => {
-  return getSubmissionsSortedDesc().slice(0, limit);
-};
+export const getActivity = (limit = 25) => getSubmissionsSortedDesc().slice(0, limit);
 
 export const getActivitySummary = (limit = 25) => {
   const subs = getSubmissionsSortedDesc();
   const seen = localStorage.getItem(STORAGE_KEY_OWNER_NOTIFIED);
   const seenTs = seen ? Date.parse(seen) : 0;
-
-  const latest = subs[0]?.submittedAt ?? '';
   const activity = subs.slice(0, limit);
-
-  const newCount = subs.filter((s) => Date.parse(s.submittedAt) > seenTs).length;
-
-  return { activity, newCount, latest };
+  const newCount = subs.filter(s => Date.parse(s.submittedAt) > seenTs).length;
+  return { activity, newCount };
 };
 
 export const markActivitySeen = (seenAt?: string) => {
   const subs = getSubmissionsSortedDesc();
   const ts = seenAt ?? subs[0]?.submittedAt;
-
-  if (ts) {
-    localStorage.setItem(STORAGE_KEY_OWNER_NOTIFIED, ts);
-  }
+  if (ts) localStorage.setItem(STORAGE_KEY_OWNER_NOTIFIED, ts);
 };
 
-const deriveOpenTrailers = (subs: SamsaraFormSubmission[]): TrailerStatus[] => {
-  const byTrailer = new Map<
-    string,
-    {
-      latest: SamsaraFormSubmission;
-      lastDrop?: SamsaraFormSubmission;
-    }
-  >();
+// --- Trailer history ---
 
-  // Sort like a stream (by submittedAt) so "latest wins"
+export const getTrailerHistory = (trailerNumber: string, limit = 10): SamsaraFormSubmission[] => {
+  const subs = getSubmissions();
+  return subs
+    .filter(s => s.trailerNumber === trailerNumber)
+    .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
+    .slice(0, limit);
+};
+
+// --- Derived open trailers ---
+
+const deriveOpenTrailers = (subs: SamsaraFormSubmission[]): TrailerStatus[] => {
+  const byTrailer = new Map<string, { latest: SamsaraFormSubmission; lastDrop?: SamsaraFormSubmission }>();
+
   subs
     .slice()
     .sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime())
-    .forEach((s) => {
+    .forEach(s => {
       const prev = byTrailer.get(s.trailerNumber);
       const record = prev ?? { latest: s };
-
       if (s.event === 'DROP') record.lastDrop = s;
-
-      // always update latest
       record.latest = s;
       byTrailer.set(s.trailerNumber, record);
     });
@@ -163,9 +184,7 @@ const deriveOpenTrailers = (subs: SamsaraFormSubmission[]): TrailerStatus[] => {
   const open: TrailerStatus[] = [];
 
   for (const [trailerNumber, rec] of byTrailer.entries()) {
-    // Open if the last event is DROP
     if (rec.latest.event !== 'DROP') continue;
-
     const lastDrop = rec.lastDrop ?? rec.latest;
 
     open.push({
@@ -176,10 +195,14 @@ const deriveOpenTrailers = (subs: SamsaraFormSubmission[]): TrailerStatus[] => {
       droppedBy: lastDrop.driverName,
       condition: lastDrop.condition ?? 'Good',
       notes: lastDrop.notes ?? '',
+      customerName: lastDrop.customerName ?? '',
+      dropLocationDesc: lastDrop.dropLocationDesc ?? '',
+      defectLevel: lastDrop.defectLevel ?? 'No',
+      defectNotes: lastDrop.defectNotes ?? '',
+      photoUrls: lastDrop.photoUrls ?? [],
     });
   }
 
-  // newest first
   return open.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
 };
 
@@ -196,6 +219,47 @@ export const getTrailers = (): TrailerStatus[] => {
   return data ? JSON.parse(data) : [];
 };
 
+// --- Data issues ---
+
+export const getDataIssues = (): DataIssue[] => {
+  const subs = getSubmissions().sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+  const issues: DataIssue[] = [];
+  const masterSet = new Set(TRAILER_MASTER_LIST.map(t => t.toUpperCase()));
+  const droppedTrailers = new Set<string>();
+
+  for (const s of subs) {
+    const tNum = s.trailerNumber.toUpperCase();
+
+    if (TRAILER_MASTER_LIST.length > 0 && !masterSet.has(tNum)) {
+      issues.push({
+        id: `issue-unknown-${s.id}`,
+        type: 'UNKNOWN_TRAILER',
+        trailerNumber: s.trailerNumber,
+        submissionId: s.id,
+        timestamp: s.submittedAt,
+        message: `Trailer "${s.trailerNumber}" is not in the master trailer list.`,
+      });
+    }
+
+    if (s.event === 'DROP') {
+      droppedTrailers.add(tNum);
+    } else if (s.event === 'PICK' && !droppedTrailers.has(tNum)) {
+      issues.push({
+        id: `issue-nodrop-${s.id}`,
+        type: 'PICKUP_WITHOUT_DROP',
+        trailerNumber: s.trailerNumber,
+        submissionId: s.id,
+        timestamp: s.submittedAt,
+        message: `Pickup recorded for "${s.trailerNumber}" with no prior drop on record.`,
+      });
+    }
+  }
+
+  return issues.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+};
+
+// --- Sync logs ---
+
 export const getLogs = (): SyncLog[] => {
   const data = localStorage.getItem(STORAGE_KEY_LOGS);
   return data ? JSON.parse(data) : [];
@@ -203,34 +267,24 @@ export const getLogs = (): SyncLog[] => {
 
 const setLogs = (logs: SyncLog[]) => localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(logs));
 
-// --- Samsara Sync Logic ---
+// --- Samsara sync ---
 
-const extractTrailerNumber = (submission: SamsaraRawSubmission): string => {
-  // In a real implementation, you would parse submission.inputs
-  return submission.trailerNumber || `TRL-${Math.floor(Math.random() * 1000)}`;
-};
+const VALID_DEFECT_LEVELS = ['No', 'Yes (minor)', 'Yes (needs attention)'] as const;
 
-/**
- * Mocks the Samsara API stream response for demonstration purposes.
- * Generates random events to simulate live activity.
- */
-const mockSamsaraStreamResponse = async (_cursor: string | null) => {
-  await new Promise(resolve => setTimeout(resolve, 800)); // Network delay
+const mockSamsaraStreamResponse = async (_cursor: string | null): Promise<SamsaraStreamResponse> => {
+  await new Promise(resolve => setTimeout(resolve, 800));
 
-  const chance = Math.random();
-  const data: any[] = [];
-  
-  // 40% chance of no new data
-  if (chance > 0.4) {
+  const data: SamsaraRawSubmission[] = [];
+
+  if (Math.random() > 0.4) {
     const isDrop = Math.random() > 0.5;
     const templateId = isDrop ? DROP_TEMPLATE_UUID : PICK_TEMPLATE_UUID;
-    const trailers = getTrailers(); // current open trailers
-    
-    // If Picking, try to pick an open trailer
-    let trailerNum = `TRL-${100 + Math.floor(Math.random() * 900)}`;
+    const trailers = getTrailers();
+    let trailerNum = TRAILER_MASTER_LIST[Math.floor(Math.random() * TRAILER_MASTER_LIST.length)] ?? `TRL-${100 + Math.floor(Math.random() * 900)}`;
     if (!isDrop && trailers.length > 0) {
       trailerNum = trailers[Math.floor(Math.random() * trailers.length)].id;
     }
+    const defectLevel = isDrop && Math.random() > 0.8 ? 'Yes (minor)' : 'No';
 
     data.push({
       id: crypto.randomUUID(),
@@ -239,30 +293,25 @@ const mockSamsaraStreamResponse = async (_cursor: string | null) => {
       trailerNumber: trailerNum,
       location: isDrop ? 'Distribution Center' : 'En Route',
       submittedAt: new Date().toISOString(),
-      condition: isDrop ? (Math.random() > 0.8 ? 'Needs Service' : 'Good') : undefined,
-      notes: 'Synced from Samsara'
+      inputs: [
+        { label: 'Job / Stop / Customer / Yard', value: 'Simulated Customer' },
+        { label: 'Trailer # (enter exactly as on trailer)', value: trailerNum },
+        { label: 'Drop location description', value: isDrop ? 'Dock #1' : '' },
+        { label: 'Any damage or defect found?', value: defectLevel },
+        { label: 'If yes, please specify', value: defectLevel !== 'No' ? 'Minor scuff on side panel' : '' },
+      ],
+      media: [],
     });
   }
 
-  return {
-    data,
-    pagination: {
-      hasNextPage: false,
-      endCursor: crypto.randomUUID()
-    }
-  };
+  return { data, pagination: { hasNextPage: false, endCursor: crypto.randomUUID() } };
 };
 
-/**
- * Core sync logic requested by user.
- * Attempts to fetch from Samsara API. Falls back to mock if no token/failure.
- */
 async function syncSamsara() {
-  initDB(); // Ensure DB is initialized
-  
+  initDB();
+
   const cursor = localStorage.getItem(STORAGE_KEY_CURSOR);
   const url = new URL('https://api.samsara.com/form-submissions/stream');
-
   if (cursor) url.searchParams.set('after', cursor);
   url.searchParams.append('formTemplateIds', DROP_TEMPLATE_UUID);
   url.searchParams.append('formTemplateIds', PICK_TEMPLATE_UUID);
@@ -270,71 +319,70 @@ async function syncSamsara() {
   let hasNext = true;
   let nextCursor = cursor;
   let processedCount = 0;
-  let newSubmissions: SamsaraFormSubmission[] = [];
-  let loopLimit = 5; // Safety break
+  const newSubmissions: SamsaraFormSubmission[] = [];
+  let loopLimit = 5;
 
   while (hasNext && loopLimit > 0) {
     loopLimit--;
     let body: SamsaraStreamResponse;
 
     try {
-      if (!SAMSARA_API_TOKEN) throw new Error("Missing Token");
-      
-      const resp = await fetch(url.toString(), { 
-        headers: { authorization: `Bearer ${SAMSARA_API_TOKEN}` } 
-      });
-      
+      if (!SAMSARA_API_TOKEN) throw new Error('Missing Token');
+      const resp = await fetch(url.toString(), { headers: { authorization: `Bearer ${SAMSARA_API_TOKEN}` } });
       if (!resp.ok) throw new Error(`API Error: ${resp.statusText}`);
       body = await resp.json();
-
     } catch (e) {
-      // Fallback to mock logic if real API fails (expected in this demo)
-      console.log("Using Mock Samsara Stream due to:", e);
+      console.log('Using Mock Samsara Stream due to:', e);
       body = await mockSamsaraStreamResponse(nextCursor);
     }
 
-    const submissions = body.data ?? [];
-    const pagination = body.pagination;
+    for (const s of body.data) {
+      const rawTrailerNum =
+        extractInput(s.inputs, 'Trailer # (enter exactly as on trailer)') ||
+        extractInput(s.inputs, 'Trailer Number') ||
+        s.trailerNumber ||
+        `TRL-${Math.floor(Math.random() * 1000)}`;
 
-    for (const s of submissions) {
-      const trailerNumber = extractTrailerNumber(s);
+      const trailerNumber = normalizeTrailerNumber(rawTrailerNum);
       const event = s.formTemplateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
+      const defectRaw = extractInput(s.inputs, 'Any damage or defect found?');
+      const defectLevel = (VALID_DEFECT_LEVELS as readonly string[]).includes(defectRaw)
+        ? (defectRaw as SamsaraFormSubmission['defectLevel'])
+        : 'No';
 
-      const sub: SamsaraFormSubmission = {
+      newSubmissions.push({
         id: s.id,
         templateId: s.formTemplateId,
         event: event as 'DROP' | 'PICK',
         driverName: s.driver?.name || 'Unknown Driver',
-        trailerNumber: trailerNumber,
-        location: s.location || 'Unknown Location',
+        trailerNumber,
+        location: s.location || extractInput(s.inputs, 'Location Address') || 'Unknown Location',
         submittedAt: s.submittedAt || new Date().toISOString(),
         condition: (s.condition as SamsaraFormSubmission['condition']) || 'Good',
         notes: s.notes || '',
-      };
-
-      newSubmissions.push(sub);
+        customerName: extractInput(s.inputs, 'Job / Stop / Customer / Yard'),
+        dropLocationDesc: extractInput(s.inputs, 'Drop location description'),
+        gpsAddress: extractInput(s.inputs, 'Location Address'),
+        defectLevel,
+        defectNotes: extractInput(s.inputs, 'If yes, please specify'),
+        accessoryNotes: extractInput(s.inputs, 'Accessories left with trailer'),
+        photoUrls: extractPhotos(s.media),
+      });
     }
 
-    processedCount += submissions.length;
-    nextCursor = pagination.endCursor ?? nextCursor;
-    
-    hasNext = pagination.hasNextPage;
-    if (hasNext && pagination.endCursor) {
-      url.searchParams.set('after', pagination.endCursor);
+    processedCount += body.data.length;
+    nextCursor = body.pagination.endCursor ?? nextCursor;
+    hasNext = body.pagination.hasNextPage;
+    if (hasNext && body.pagination.endCursor) {
+      url.searchParams.set('after', body.pagination.endCursor);
     }
   }
 
-  // "Transaction": Save submissions and update derived state
   if (newSubmissions.length > 0) {
     const allSubs = getSubmissions();
-    // Simple deduplication based on ID
     const existingIds = new Set(allSubs.map(s => s.id));
     const uniqueNew = newSubmissions.filter(s => !existingIds.has(s.id));
-    
-    if (uniqueNew.length > 0) {
-      const updated = [...allSubs, ...uniqueNew];
-      setSubmissions(updated); // Saves to localStorage and updates open trailers
-    }
+    if (uniqueNew.length > 0) setSubmissions([...allSubs, ...uniqueNew]);
   }
 
   if (nextCursor && nextCursor !== cursor) {
@@ -347,17 +395,15 @@ async function syncSamsara() {
 export const triggerSamsaraSync = async (): Promise<{ success: boolean; message: string }> => {
   try {
     const count = await syncSamsara();
-    
     const logs = getLogs();
     logs.unshift({
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       status: 'SUCCESS',
       recordsProcessed: count,
-      message: count > 0 ? `Synced ${count} new submissions.` : 'Sync complete. No new records.'
+      message: count > 0 ? `Synced ${count} new submissions.` : 'Sync complete. No new records.',
     });
     setLogs(logs);
-
     return { success: true, message: `Synced ${count} records.` };
   } catch (error: any) {
     const logs = getLogs();
@@ -366,10 +412,9 @@ export const triggerSamsaraSync = async (): Promise<{ success: boolean; message:
       timestamp: new Date().toISOString(),
       status: 'FAILURE',
       recordsProcessed: 0,
-      message: error.message || 'Unknown error during sync.'
+      message: error.message || 'Unknown error during sync.',
     });
     setLogs(logs);
-
     return { success: false, message: 'Sync failed.' };
   }
 };
@@ -378,24 +423,15 @@ export const getNewEventsForOwnerNotifications = (limit = 5) => {
   const subs = getSubmissionsSortedDesc();
   const notified = localStorage.getItem(STORAGE_KEY_OWNER_NOTIFIED);
   const notifiedTs = notified ? Date.parse(notified) : 0;
-
-  const newEvents = subs.filter((s) => Date.parse(s.submittedAt) > notifiedTs);
-
-  // Show oldest first so toasts appear in chronological order
+  const newEvents = subs.filter(s => Date.parse(s.submittedAt) > notifiedTs);
   const ordered = newEvents.slice().sort((a, b) => Date.parse(a.submittedAt) - Date.parse(b.submittedAt));
   const toNotify = ordered.slice(0, limit);
-
   const last = toNotify[toNotify.length - 1];
-  const lastTs = last?.submittedAt;
-
-  return { toNotify, lastTs };
+  return { toNotify, lastTs: last?.submittedAt };
 };
 
 export const markOwnerNotified = (lastTs?: string) => {
   const subs = getSubmissionsSortedDesc();
   const ts = lastTs ?? subs[0]?.submittedAt;
-
-  if (ts) {
-    localStorage.setItem(STORAGE_KEY_OWNER_NOTIFIED, ts);
-  }
+  if (ts) localStorage.setItem(STORAGE_KEY_OWNER_NOTIFIED, ts);
 };

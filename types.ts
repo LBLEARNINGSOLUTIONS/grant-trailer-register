@@ -1,10 +1,11 @@
 export enum AppMode {
   OWNER = 'OWNER',
-  ADMIN = 'ADMIN'
+  ADMIN = 'ADMIN',
+  BOARD = 'BOARD',
 }
 
 export interface TrailerStatus {
-  id: string; // Trailer Number
+  id: string; // Trailer Number (normalized)
   status: 'DROPPED' | 'PICKED_UP';
   location: string;
   lastUpdated: string; // ISO Date
@@ -12,6 +13,12 @@ export interface TrailerStatus {
   pickedUpBy?: string;
   notes?: string;
   condition?: 'Good' | 'Damaged' | 'Needs Service';
+  // Extended fields from Samsara form
+  customerName?: string;
+  dropLocationDesc?: string;
+  defectLevel?: 'No' | 'Yes (minor)' | 'Yes (needs attention)';
+  defectNotes?: string;
+  photoUrls?: string[];
 }
 
 export interface SamsaraFormSubmission {
@@ -24,6 +31,14 @@ export interface SamsaraFormSubmission {
   submittedAt: string;
   notes?: string;
   condition?: 'Good' | 'Damaged' | 'Needs Service';
+  // Extended fields from Samsara form inputs
+  customerName?: string;
+  dropLocationDesc?: string;
+  gpsAddress?: string;
+  defectLevel?: 'No' | 'Yes (minor)' | 'Yes (needs attention)';
+  defectNotes?: string;
+  accessoryNotes?: string;
+  photoUrls?: string[];
 }
 
 export interface SyncLog {
@@ -32,4 +47,13 @@ export interface SyncLog {
   status: 'SUCCESS' | 'FAILURE';
   recordsProcessed: number;
   message?: string;
+}
+
+export interface DataIssue {
+  id: string;
+  type: 'PICKUP_WITHOUT_DROP' | 'UNKNOWN_TRAILER';
+  trailerNumber: string;
+  submissionId: string;
+  timestamp: string;
+  message: string;
 }
