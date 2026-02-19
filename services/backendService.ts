@@ -29,7 +29,6 @@ const STORAGE_KEY_LOGS = 'grant_sync_logs';
 const STORAGE_KEY_OWNER_NOTIFIED = 'grant_owner_notified';
 const STORAGE_KEY_CURSOR = 'grant_samsara_cursor';
 
-const SAMSARA_API_TOKEN = import.meta.env.VITE_SAMSARA_API_TOKEN ?? '';
 
 // --- Samsara form input helpers ---
 
@@ -316,7 +315,7 @@ async function syncSamsara() {
   initDB();
 
   const cursor = localStorage.getItem(STORAGE_KEY_CURSOR);
-  const url = new URL('https://api.samsara.com/form-submissions/stream');
+  const url = new URL('/api/samsara-proxy', window.location.origin);
   if (cursor) url.searchParams.set('after', cursor);
   url.searchParams.append('formTemplateIds', DROP_TEMPLATE_UUID);
   url.searchParams.append('formTemplateIds', PICK_TEMPLATE_UUID);
@@ -332,8 +331,7 @@ async function syncSamsara() {
     let body: SamsaraStreamResponse;
 
     try {
-      if (!SAMSARA_API_TOKEN) throw new Error('Missing Token');
-      const resp = await fetch(url.toString(), { headers: { authorization: `Bearer ${SAMSARA_API_TOKEN}` } });
+      const resp = await fetch(url.toString());
       if (!resp.ok) throw new Error(`API Error: ${resp.statusText}`);
       body = await resp.json();
     } catch (e) {
