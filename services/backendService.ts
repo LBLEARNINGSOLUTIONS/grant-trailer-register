@@ -332,8 +332,19 @@ async function syncSamsara() {
 
     try {
       const resp = await fetch(url.toString());
-      if (!resp.ok) throw new Error(`API Error: ${resp.statusText}`);
-      body = await resp.json();
+      if (resp.status === 400) {
+        // Stale or invalid cursor — clear it and restart from the beginning
+        localStorage.removeItem(STORAGE_KEY_CURSOR);
+        url.searchParams.delete('after');
+        nextCursor = null;
+        const retryResp = await fetch(url.toString());
+        if (!retryResp.ok) throw new Error(`API Error: ${retryResp.statusText}`);
+        body = await retryResp.json();
+      } else if (!resp.ok) {
+        throw new Error(`API Error: ${resp.statusText}`);
+      } else {
+        body = await resp.json();
+      }
     } catch (e) {
       console.log('Using Mock Samsara Stream due to:', e);
       body = await mockSamsaraStreamResponse(nextCursor);
