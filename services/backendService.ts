@@ -293,12 +293,17 @@ const mockSamsaraStreamResponse = async (_cursor: string | null): Promise<Samsar
       trailerNumber: trailerNum,
       location: isDrop ? 'Distribution Center' : 'En Route',
       submittedAt: new Date().toISOString(),
-      inputs: [
+      inputs: isDrop ? [
         { label: 'Job / Stop / Customer / Yard', value: 'Simulated Customer' },
         { label: 'Trailer # (enter exactly as on trailer)', value: trailerNum },
-        { label: 'Drop location description', value: isDrop ? 'Dock #1' : '' },
+        { label: 'Drop location description', value: 'Dock #1' },
         { label: 'Any damage or defect found?', value: defectLevel },
         { label: 'If yes, please specify', value: defectLevel !== 'No' ? 'Minor scuff on side panel' : '' },
+      ] : [
+        { label: 'Job / Stop / Customer / Yard', value: 'Simulated Customer' },
+        { label: 'Trailer Number', value: trailerNum },
+        { label: 'Visible damage', value: defectLevel },
+        { label: 'If yes, please specify here', value: defectLevel !== 'No' ? 'Minor scuff on side panel' : '' },
       ],
       media: [],
     });
@@ -345,7 +350,8 @@ async function syncSamsara() {
 
       const trailerNumber = normalizeTrailerNumber(rawTrailerNum);
       const event = s.formTemplateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
-      const defectRaw = extractInput(s.inputs, 'Any damage or defect found?');
+      // Drop form uses "Any damage or defect found?", pickup form uses "Visible damage"
+      const defectRaw = extractInput(s.inputs, 'Visible damage') || extractInput(s.inputs, 'Any damage or defect found?');
       const defectLevel = (VALID_DEFECT_LEVELS as readonly string[]).includes(defectRaw)
         ? (defectRaw as SamsaraFormSubmission['defectLevel'])
         : 'No';
