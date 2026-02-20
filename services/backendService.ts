@@ -124,10 +124,19 @@ const initDB = () => {
   updateDerivedOpenTrailers();
 };
 
+const sanitizeSubmission = (s: SamsaraFormSubmission): SamsaraFormSubmission => ({
+  ...s,
+  location: typeof s.location === 'string' ? s.location : (() => {
+    const loc = s.location as any;
+    return loc?.address || (loc?.latitude != null ? `${loc.latitude}, ${loc.longitude}` : 'Unknown Location');
+  })(),
+});
+
 const getSubmissions = (): SamsaraFormSubmission[] => {
   initDB();
   const data = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
-  return data ? JSON.parse(data) : [];
+  const subs: SamsaraFormSubmission[] = data ? JSON.parse(data) : [];
+  return subs.map(sanitizeSubmission);
 };
 
 const setSubmissions = (subs: SamsaraFormSubmission[]) => {
