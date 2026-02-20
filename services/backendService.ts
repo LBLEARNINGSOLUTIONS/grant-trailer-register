@@ -3,7 +3,8 @@ import { DROP_TEMPLATE_UUID, PICK_TEMPLATE_UUID, TRAILER_MASTER_LIST } from '../
 
 interface SamsaraRawSubmission {
   id: string;
-  formTemplateId: string;
+  formTemplateId?: string;                              // flat field (fallback)
+  formTemplate?: { id?: string; name?: string };        // nested object (real Samsara shape)
   driver?: { name?: string };
   trailerNumber?: string;
   // Samsara returns location as an object with lat/lng, not a string
@@ -296,6 +297,7 @@ async function syncSamsara() {
         throw new Error(`API Error: ${resp.status} ${errText}`);
       }
       body = await resp.json();
+      if (body.data.length > 0) console.log('[Samsara raw sample]', JSON.stringify(body.data[0]).slice(0, 600));
     } catch (e) {
       console.log('Using Mock Samsara Stream due to:', e);
       useMock = true;
@@ -303,7 +305,10 @@ async function syncSamsara() {
       hasNext = false;
     }
 
-    for (const s of body.data.filter(s => s.formTemplateId === DROP_TEMPLATE_UUID || s.formTemplateId === PICK_TEMPLATE_UUID)) {
+    for (const s of body.data) {
+      const templateId = s.formTemplate?.id ?? s.formTemplateId ?? '';
+      if (templateId !== DROP_TEMPLATE_UUID && templateId !== PICK_TEMPLATE_UUID) continue;
+
       const rawTrailerNum =
         extractInput(s.inputs, 'Trailer # (enter exactly as on trailer)') ||
         extractInput(s.inputs, 'Trailer Number') ||
@@ -311,7 +316,7 @@ async function syncSamsara() {
         `TRL-${Math.floor(Math.random() * 1000)}`;
 
       const trailerNumber = normalizeTrailerNumber(rawTrailerNum);
-      const event = s.formTemplateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
+      const event = templateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
       const defectRaw = extractInput(s.inputs, 'Visible damage') || extractInput(s.inputs, 'Any damage or defect found?');
       const defectLevel = (VALID_DEFECT_LEVELS as readonly string[]).includes(defectRaw)
         ? (defectRaw as SamsaraFormSubmission['defectLevel'])
@@ -319,7 +324,7 @@ async function syncSamsara() {
 
       newSubmissions.push({
         id: s.id,
-        templateId: s.formTemplateId,
+        templateId,
         event: event as 'DROP' | 'PICK',
         driverName: s.driver?.name || 'Unknown Driver',
         trailerNumber,
