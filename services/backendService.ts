@@ -29,6 +29,7 @@ const STORAGE_KEY_SUBMISSIONS = 'grant_samsara_submissions';
 const STORAGE_KEY_LOGS = 'grant_sync_logs';
 const STORAGE_KEY_OWNER_NOTIFIED = 'grant_owner_notified';
 const STORAGE_KEY_CURSOR = 'grant_samsara_cursor';
+const STORAGE_KEY_SYNC_START = 'grant_samsara_start_time';
 
 
 // --- Samsara form input helpers ---
@@ -331,15 +332,15 @@ async function syncSamsara() {
   initDB();
 
   const cursor = localStorage.getItem(STORAGE_KEY_CURSOR);
+  const storedStart = localStorage.getItem(STORAGE_KEY_SYNC_START);
+  const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+  // startTime must be consistent across all pages of a pagination sequence
+  const startTime = storedStart ?? oneYearAgo;
+  if (!storedStart) localStorage.setItem(STORAGE_KEY_SYNC_START, startTime);
+
   const url = new URL('/api/samsara-proxy', window.location.origin);
-  if (cursor) {
-    // Cursor encodes original params — do NOT include startTime alongside it
-    url.searchParams.set('after', cursor);
-  } else {
-    // First request: startTime required, no cursor
-    const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
-    url.searchParams.set('startTime', oneYearAgo);
-  }
+  url.searchParams.set('startTime', startTime);
+  if (cursor) url.searchParams.set('after', cursor);
   // Note: formTemplateIds is NOT a valid param for /stream — filter client-side below
 
   let hasNext = true;
@@ -359,10 +360,10 @@ async function syncSamsara() {
         const errText = await resp.text().catch(() => '');
         console.warn('Samsara 400 response:', errText);
         localStorage.removeItem(STORAGE_KEY_CURSOR);
+        const freshStart = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+        localStorage.setItem(STORAGE_KEY_SYNC_START, freshStart);
         url.searchParams.delete('after');
-        url.searchParams.delete('startTime');
-        const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
-        url.searchParams.set('startTime', oneYearAgo);
+        url.searchParams.set('startTime', freshStart);
         nextCursor = null;
         const retryResp = await fetch(url.toString());
         if (!retryResp.ok) throw new Error(`API Error: ${retryResp.status} ${await retryResp.text().catch(() => '')}`);
