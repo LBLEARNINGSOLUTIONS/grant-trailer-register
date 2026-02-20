@@ -28,8 +28,7 @@ const STORAGE_KEY_TRAILERS = 'grant_trailers_db';
 const STORAGE_KEY_SUBMISSIONS = 'grant_samsara_submissions';
 const STORAGE_KEY_LOGS = 'grant_sync_logs';
 const STORAGE_KEY_OWNER_NOTIFIED = 'grant_owner_notified';
-const STORAGE_KEY_CURSOR = 'grant_samsara_cursor';
-const STORAGE_KEY_SYNC_START = 'grant_samsara_start_time';
+const STORAGE_KEY_LAST_SYNC = 'grant_last_sync_time';
 
 
 // --- Samsara form input helpers ---
@@ -331,51 +330,38 @@ const mockSamsaraStreamResponse = async (_cursor: string | null): Promise<Samsar
 async function syncSamsara() {
   initDB();
 
-  const cursor = localStorage.getItem(STORAGE_KEY_CURSOR);
-  const storedStart = localStorage.getItem(STORAGE_KEY_SYNC_START);
-  const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
-  // startTime must be consistent across all pages of a pagination sequence
-  const startTime = storedStart ?? oneYearAgo;
-  if (!storedStart) localStorage.setItem(STORAGE_KEY_SYNC_START, startTime);
+  // Use last sync time as startTime so we only fetch new submissions.
+  // Cursors are used within a single sync for pagination but never persisted
+  // between syncs — this avoids "Parameters differ" errors from stale cursors.
+  const lastSync = localStorage.getItem(STORAGE_KEY_LAST_SYNC);
+  const startTime = lastSync ?? new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
 
   const url = new URL('/api/samsara-proxy', window.location.origin);
   url.searchParams.set('startTime', startTime);
-  if (cursor) url.searchParams.set('after', cursor);
-  // Note: formTemplateIds is NOT a valid param for /stream — filter client-side below
 
   let hasNext = true;
-  let nextCursor = cursor;
   let processedCount = 0;
   const newSubmissions: SamsaraFormSubmission[] = [];
-  let loopLimit = 5;
+  let loopLimit = 10;
+  let useMock = false;
 
   while (hasNext && loopLimit > 0) {
     loopLimit--;
     let body: SamsaraStreamResponse;
 
     try {
+      if (useMock) throw new Error('mock');
       const resp = await fetch(url.toString());
-      if (resp.status === 400) {
-        // Stale/invalid cursor or param mismatch — clear cursor, restart with startTime
+      if (!resp.ok) {
         const errText = await resp.text().catch(() => '');
-        console.warn('Samsara 400 response:', errText);
-        localStorage.removeItem(STORAGE_KEY_CURSOR);
-        const freshStart = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
-        localStorage.setItem(STORAGE_KEY_SYNC_START, freshStart);
-        url.searchParams.delete('after');
-        url.searchParams.set('startTime', freshStart);
-        nextCursor = null;
-        const retryResp = await fetch(url.toString());
-        if (!retryResp.ok) throw new Error(`API Error: ${retryResp.status} ${await retryResp.text().catch(() => '')}`);
-        body = await retryResp.json();
-      } else if (!resp.ok) {
-        throw new Error(`API Error: ${resp.statusText}`);
-      } else {
-        body = await resp.json();
+        throw new Error(`API Error: ${resp.status} ${errText}`);
       }
+      body = await resp.json();
     } catch (e) {
       console.log('Using Mock Samsara Stream due to:', e);
-      body = await mockSamsaraStreamResponse(nextCursor);
+      useMock = true;
+      body = await mockSamsaraStreamResponse(null);
+      hasNext = false;
     }
 
     for (const s of body.data.filter(s => s.formTemplateId === DROP_TEMPLATE_UUID || s.formTemplateId === PICK_TEMPLATE_UUID)) {
@@ -387,7 +373,6 @@ async function syncSamsara() {
 
       const trailerNumber = normalizeTrailerNumber(rawTrailerNum);
       const event = s.formTemplateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
-      // Drop form uses "Any damage or defect found?", pickup form uses "Visible damage"
       const defectRaw = extractInput(s.inputs, 'Visible damage') || extractInput(s.inputs, 'Any damage or defect found?');
       const defectLevel = (VALID_DEFECT_LEVELS as readonly string[]).includes(defectRaw)
         ? (defectRaw as SamsaraFormSubmission['defectLevel'])
@@ -414,9 +399,9 @@ async function syncSamsara() {
     }
 
     processedCount += body.data.length;
-    nextCursor = body.pagination.endCursor ?? nextCursor;
     hasNext = body.pagination.hasNextPage;
     if (hasNext && body.pagination.endCursor) {
+      // Within-sync cursor: same startTime, just advance the page
       url.searchParams.set('after', body.pagination.endCursor);
     }
   }
@@ -428,8 +413,10 @@ async function syncSamsara() {
     if (uniqueNew.length > 0) setSubmissions([...allSubs, ...uniqueNew]);
   }
 
-  if (nextCursor && nextCursor !== cursor) {
-    localStorage.setItem(STORAGE_KEY_CURSOR, nextCursor);
+  // Advance the sync window; next sync will start from now (minus a small overlap)
+  if (!useMock) {
+    const overlapMs = 5 * 60 * 1000; // 5-minute overlap to catch late-indexed submissions
+    localStorage.setItem(STORAGE_KEY_LAST_SYNC, new Date(Date.now() - overlapMs).toISOString());
   }
 
   return processedCount;
