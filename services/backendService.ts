@@ -319,12 +319,11 @@ async function syncSamsara() {
   if (cursor) {
     url.searchParams.set('after', cursor);
   } else {
-    // startTime required by Samsara stream endpoint on first request (no cursor)
+    // startTime is required by Samsara stream endpoint on first request (no cursor)
     const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
     url.searchParams.set('startTime', oneYearAgo);
   }
-  url.searchParams.append('formTemplateIds', DROP_TEMPLATE_UUID);
-  url.searchParams.append('formTemplateIds', PICK_TEMPLATE_UUID);
+  // Note: formTemplateIds is NOT a valid param for /stream — filter client-side below
 
   let hasNext = true;
   let nextCursor = cursor;
@@ -339,14 +338,16 @@ async function syncSamsara() {
     try {
       const resp = await fetch(url.toString());
       if (resp.status === 400) {
-        // Stale or invalid cursor — clear it and restart from the beginning
+        // Stale or invalid cursor — clear it and restart with startTime
+        const errText = await resp.text().catch(() => '');
+        console.warn('Samsara 400 response:', errText);
         localStorage.removeItem(STORAGE_KEY_CURSOR);
         url.searchParams.delete('after');
         const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
         url.searchParams.set('startTime', oneYearAgo);
         nextCursor = null;
         const retryResp = await fetch(url.toString());
-        if (!retryResp.ok) throw new Error(`API Error: ${retryResp.statusText}`);
+        if (!retryResp.ok) throw new Error(`API Error: ${retryResp.status} ${await retryResp.text().catch(() => '')}`);
         body = await retryResp.json();
       } else if (!resp.ok) {
         throw new Error(`API Error: ${resp.statusText}`);
@@ -358,7 +359,7 @@ async function syncSamsara() {
       body = await mockSamsaraStreamResponse(nextCursor);
     }
 
-    for (const s of body.data) {
+    for (const s of body.data.filter(s => s.formTemplateId === DROP_TEMPLATE_UUID || s.formTemplateId === PICK_TEMPLATE_UUID)) {
       const rawTrailerNum =
         extractInput(s.inputs, 'Trailer # (enter exactly as on trailer)') ||
         extractInput(s.inputs, 'Trailer Number') ||
