@@ -46,8 +46,7 @@ const App: React.FC = () => {
             <Truck size={20} />
           </div>
           <div>
-            <h1 className="text-lg font-bold leading-tight text-slate-800">Grant Trailer</h1>
-            <p className="text-xs text-slate-400">Register System</p>
+            <h1 className="text-lg font-bold leading-tight text-slate-800">L&B Trailer System</h1>
           </div>
         </div>
 
