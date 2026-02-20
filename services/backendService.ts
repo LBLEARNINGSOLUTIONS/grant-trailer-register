@@ -6,7 +6,8 @@ interface SamsaraRawSubmission {
   formTemplateId: string;
   driver?: { name?: string };
   trailerNumber?: string;
-  location?: string;
+  // Samsara returns location as an object with lat/lng, not a string
+  location?: string | { latitude?: number; longitude?: number; address?: string };
   submittedAt?: string;
   condition?: string;
   notes?: string;
@@ -45,6 +46,12 @@ function extractPhotos(media: { url: string; type?: string }[] | undefined): str
 
 function normalizeTrailerNumber(raw: string): string {
   return raw.trim().toUpperCase().replace(/\s+/g, '-');
+}
+
+function locationToString(loc: SamsaraRawSubmission['location']): string {
+  if (!loc) return '';
+  if (typeof loc === 'string') return loc;
+  return loc.address || (loc.latitude != null ? `${loc.latitude}, ${loc.longitude}` : '');
 }
 
 // --- DB bootstrap ---
@@ -316,13 +323,10 @@ async function syncSamsara() {
 
   const cursor = localStorage.getItem(STORAGE_KEY_CURSOR);
   const url = new URL('/api/samsara-proxy', window.location.origin);
-  if (cursor) {
-    url.searchParams.set('after', cursor);
-  } else {
-    // startTime is required by Samsara stream endpoint on first request (no cursor)
-    const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
-    url.searchParams.set('startTime', oneYearAgo);
-  }
+  // startTime is ALWAYS required by Samsara stream endpoint (even with cursor)
+  const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+  url.searchParams.set('startTime', oneYearAgo);
+  if (cursor) url.searchParams.set('after', cursor);
   // Note: formTemplateIds is NOT a valid param for /stream — filter client-side below
 
   let hasNext = true;
@@ -380,7 +384,7 @@ async function syncSamsara() {
         event: event as 'DROP' | 'PICK',
         driverName: s.driver?.name || 'Unknown Driver',
         trailerNumber,
-        location: s.location || extractInput(s.inputs, 'Location Address') || 'Unknown Location',
+        location: locationToString(s.location) || extractInput(s.inputs, 'Location Address') || 'Unknown Location',
         submittedAt: s.submittedAt || new Date().toISOString(),
         condition: (s.condition as SamsaraFormSubmission['condition']) || 'Good',
         notes: s.notes || '',
