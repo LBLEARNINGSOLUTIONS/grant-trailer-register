@@ -1,5 +1,5 @@
 import { TrailerStatus, SyncLog, SamsaraFormSubmission, DataIssue } from '../types';
-import { MOCK_TRAILERS, DROP_TEMPLATE_UUID, PICK_TEMPLATE_UUID, TRAILER_MASTER_LIST } from '../constants';
+import { DROP_TEMPLATE_UUID, PICK_TEMPLATE_UUID, TRAILER_MASTER_LIST } from '../constants';
 
 interface SamsaraRawSubmission {
   id: string;
@@ -57,70 +57,9 @@ function locationToString(loc: SamsaraRawSubmission['location']): string {
 // --- DB bootstrap ---
 
 const initDB = () => {
-  const existingSubs = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
-  if (!existingSubs) {
-    const bootSubmissions: SamsaraFormSubmission[] = [];
-
-    MOCK_TRAILERS.forEach((t: any, idx: number) => {
-      const baseDriver = t.droppedBy ?? t.pickedUpBy ?? `Driver ${idx + 1}`;
-      const baseLocation = t.location ?? `Location ${idx + 1}`;
-      const pickupAt = new Date(t.lastUpdated);
-
-      if (t.status === 'DROPPED') {
-        bootSubmissions.push({
-          id: `bootstrap-${t.id}-drop`,
-          templateId: DROP_TEMPLATE_UUID,
-          event: 'DROP',
-          driverName: baseDriver,
-          trailerNumber: t.id,
-          location: baseLocation,
-          submittedAt: pickupAt.toISOString(),
-          condition: t.condition ?? 'Good',
-          notes: '',
-          customerName: t.customerName ?? '',
-          dropLocationDesc: t.dropLocationDesc ?? '',
-          defectLevel: t.defectLevel ?? 'No',
-          defectNotes: t.defectNotes ?? '',
-          photoUrls: [],
-        });
-      } else {
-        const dropAt = new Date(pickupAt.getTime() - 2 * 60 * 60 * 1000);
-        bootSubmissions.push(
-          {
-            id: `bootstrap-${t.id}-drop`,
-            templateId: DROP_TEMPLATE_UUID,
-            event: 'DROP',
-            driverName: baseDriver,
-            trailerNumber: t.id,
-            location: baseLocation,
-            submittedAt: dropAt.toISOString(),
-            condition: t.condition ?? 'Good',
-            notes: '',
-            customerName: t.customerName ?? '',
-            dropLocationDesc: '',
-            defectLevel: 'No',
-            defectNotes: '',
-            photoUrls: [],
-          },
-          {
-            id: `bootstrap-${t.id}-pick`,
-            templateId: PICK_TEMPLATE_UUID,
-            event: 'PICK',
-            driverName: baseDriver,
-            trailerNumber: t.id,
-            location: baseLocation,
-            submittedAt: pickupAt.toISOString(),
-            notes: '',
-            customerName: t.customerName ?? '',
-            photoUrls: [],
-          }
-        );
-      }
-    });
-
-    localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(bootSubmissions));
+  if (!localStorage.getItem(STORAGE_KEY_SUBMISSIONS)) {
+    localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify([]));
   }
-
   updateDerivedOpenTrailers();
 };
 
