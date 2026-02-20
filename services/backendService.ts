@@ -332,10 +332,14 @@ async function syncSamsara() {
 
   const cursor = localStorage.getItem(STORAGE_KEY_CURSOR);
   const url = new URL('/api/samsara-proxy', window.location.origin);
-  // startTime is ALWAYS required by Samsara stream endpoint (even with cursor)
-  const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
-  url.searchParams.set('startTime', oneYearAgo);
-  if (cursor) url.searchParams.set('after', cursor);
+  if (cursor) {
+    // Cursor encodes original params — do NOT include startTime alongside it
+    url.searchParams.set('after', cursor);
+  } else {
+    // First request: startTime required, no cursor
+    const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+    url.searchParams.set('startTime', oneYearAgo);
+  }
   // Note: formTemplateIds is NOT a valid param for /stream — filter client-side below
 
   let hasNext = true;
@@ -351,11 +355,12 @@ async function syncSamsara() {
     try {
       const resp = await fetch(url.toString());
       if (resp.status === 400) {
-        // Stale or invalid cursor — clear it and restart with startTime
+        // Stale/invalid cursor or param mismatch — clear cursor, restart with startTime
         const errText = await resp.text().catch(() => '');
         console.warn('Samsara 400 response:', errText);
         localStorage.removeItem(STORAGE_KEY_CURSOR);
         url.searchParams.delete('after');
+        url.searchParams.delete('startTime');
         const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
         url.searchParams.set('startTime', oneYearAgo);
         nextCursor = null;
