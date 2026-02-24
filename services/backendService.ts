@@ -99,6 +99,39 @@ function locationToString(loc: SamsaraRawSubmission['location']): string {
   return loc.address || (loc.latitude != null ? `${loc.latitude}, ${loc.longitude}` : '');
 }
 
+/** Reverse-geocode lat,lng to a street address using free OpenStreetMap Nominatim API */
+async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const resp = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+      { headers: { 'User-Agent': 'LBTrailerSystem/1.0' } }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    // Build a concise address from parts
+    const a = data.address;
+    if (!a) return data.display_name || null;
+    const parts = [
+      a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road,
+      a.city || a.town || a.village,
+      a.state,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(', ') : data.display_name || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Check if a string looks like raw coordinates (e.g. "43.874, -111.851") */
+function looksLikeCoordinates(s: string): { lat: number; lng: number } | null {
+  const m = s.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+  if (!m) return null;
+  const lat = parseFloat(m[1]);
+  const lng = parseFloat(m[2]);
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
 // --- DB bootstrap ---
 
 const initDB = () => {
@@ -402,6 +435,15 @@ async function syncSamsara() {
     if (hasNext && body.pagination.endCursor) {
       // Within-sync cursor: same startTime, just advance the page
       url.searchParams.set('after', body.pagination.endCursor);
+    }
+  }
+
+  // Reverse-geocode any coordinate-only locations to real addresses
+  for (const sub of newSubmissions) {
+    const coords = looksLikeCoordinates(sub.location);
+    if (coords) {
+      const address = await reverseGeocode(coords.lat, coords.lng);
+      if (address) sub.location = address;
     }
   }
 
