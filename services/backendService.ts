@@ -324,7 +324,6 @@ async function syncSamsara() {
   url.searchParams.set('startTime', startTime);
 
   let hasNext = true;
-  let processedCount = 0;
   const newSubmissions: SamsaraFormSubmission[] = [];
   let loopLimit = 10;
   let useMock = false;
@@ -399,7 +398,6 @@ async function syncSamsara() {
       });
     }
 
-    processedCount += body.data.length;
     hasNext = body.pagination.hasNextPage;
     if (hasNext && body.pagination.endCursor) {
       // Within-sync cursor: same startTime, just advance the page
@@ -420,7 +418,7 @@ async function syncSamsara() {
     localStorage.setItem(STORAGE_KEY_LAST_SYNC, new Date(Date.now() - overlapMs).toISOString());
   }
 
-  return processedCount;
+  return newSubmissions.length;
 }
 
 export const triggerSamsaraSync = async (): Promise<{ success: boolean; message: string }> => {
