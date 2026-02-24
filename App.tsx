@@ -79,6 +79,13 @@ const App: React.FC = () => {
         <NavButton targetMode={AppMode.OWNER} icon={LayoutDashboard} label="Dashboard" />
         <NavButton targetMode={AppMode.ADMIN} icon={Shield} label="Admin" />
       </nav>
+
+      {/* Company Logo — bottom right */}
+      <img
+        src="/lb-logo.jpg"
+        alt="L&B Learning Solutions"
+        className="fixed bottom-3 right-3 h-10 opacity-40 pointer-events-none md:bottom-4 md:right-4 md:h-12"
+      />
     </div>
   );
 };
