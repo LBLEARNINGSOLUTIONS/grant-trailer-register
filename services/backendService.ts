@@ -1,18 +1,32 @@
 import { TrailerStatus, SyncLog, SamsaraFormSubmission, DataIssue } from '../types';
 import { DROP_TEMPLATE_UUID, PICK_TEMPLATE_UUID, TRAILER_MASTER_LIST } from '../constants';
 
+// Real Samsara form-submissions/stream response shape
+interface SamsaraRawField {
+  id: string;
+  label: string;
+  type: string;
+  // Value lives in a type-specific key
+  stringValue?: string;
+  numberValue?: { value?: number };
+  multipleChoiceValue?: { selected?: string[] };
+  mediaValue?: { mediaList?: { id: string; url: string; processingStatus?: string }[] };
+}
+
 interface SamsaraRawSubmission {
   id: string;
-  formTemplateId?: string;                              // flat field (fallback)
+  formTemplateId?: string;                              // flat field (fallback / mock)
   formTemplate?: { id?: string; name?: string };        // nested object (real Samsara shape)
+  submittedBy?: { id?: string; name?: string; type?: string };
+  submittedAtTime?: string;                             // real Samsara timestamp
+  submittedAt?: string;                                 // mock fallback
+  location?: string | { latitude?: number; longitude?: number; address?: string };
+  fields?: SamsaraRawField[];                           // real Samsara form fields
+  // Legacy mock-only fields
   driver?: { name?: string };
   trailerNumber?: string;
-  // Samsara returns location as an object with lat/lng, not a string
-  location?: string | { latitude?: number; longitude?: number; address?: string };
-  submittedAt?: string;
   condition?: string;
   notes?: string;
-  // Real Samsara API shape
   inputs?: { label: string; value: string }[];
   media?: { url: string; type?: string }[];
 }
@@ -32,17 +46,47 @@ const STORAGE_KEY_OWNER_NOTIFIED = 'grant_owner_notified';
 const STORAGE_KEY_LAST_SYNC = 'grant_last_sync_time';
 
 
-// --- Samsara form input helpers ---
+// --- Samsara form field helpers ---
 
-function extractInput(inputs: { label: string; value: string }[] | undefined, label: string): string {
-  if (!inputs) return '';
-  const match = inputs.find(i => i.label.toLowerCase().includes(label.toLowerCase()));
-  return match?.value ?? '';
+/** Extract a text value from Samsara fields[] (real API) or inputs[] (mock) by label substring match */
+function extractField(fields: SamsaraRawField[] | undefined, inputs: { label: string; value: string }[] | undefined, label: string): string {
+  // Try real Samsara fields[] first
+  if (fields) {
+    const match = fields.find(f => f.label.toLowerCase().includes(label.toLowerCase()));
+    if (match) {
+      if (match.stringValue != null) return match.stringValue;
+      if (match.numberValue?.value != null) return String(match.numberValue.value);
+      if (match.multipleChoiceValue?.selected?.length) return match.multipleChoiceValue.selected.join(', ');
+      return '';
+    }
+  }
+  // Fallback to mock inputs[]
+  if (inputs) {
+    const match = inputs.find(i => i.label.toLowerCase().includes(label.toLowerCase()));
+    return match?.value ?? '';
+  }
+  return '';
 }
 
-function extractPhotos(media: { url: string; type?: string }[] | undefined): string[] {
-  if (!media) return [];
-  return media.filter(m => !m.type || m.type === 'image').map(m => m.url);
+/** Extract photo URLs from Samsara fields[] (real API mediaValue) or media[] (mock) */
+function extractFieldPhotos(fields: SamsaraRawField[] | undefined, media: { url: string; type?: string }[] | undefined): string[] {
+  // Try real Samsara fields[] — find all media-type fields
+  if (fields) {
+    const urls: string[] = [];
+    for (const f of fields) {
+      if (f.mediaValue?.mediaList) {
+        for (const m of f.mediaValue.mediaList) {
+          if (m.url && m.processingStatus !== 'failed') urls.push(m.url);
+        }
+      }
+    }
+    if (urls.length > 0) return urls;
+  }
+  // Fallback to mock media[]
+  if (media) {
+    return media.filter(m => !m.type || m.type === 'image').map(m => m.url);
+  }
+  return [];
 }
 
 function normalizeTrailerNumber(raw: string): string {
@@ -320,35 +364,38 @@ async function syncSamsara() {
       if (templateId !== DROP_TEMPLATE_UUID && templateId !== PICK_TEMPLATE_UUID) continue;
 
       const rawTrailerNum =
-        extractInput(s.inputs, 'Trailer # (enter exactly as on trailer)') ||
-        extractInput(s.inputs, 'Trailer Number') ||
+        extractField(s.fields, s.inputs, 'Trailer # (enter exactly as on trailer)') ||
+        extractField(s.fields, s.inputs, 'Trailer Number') ||
         s.trailerNumber ||
         `TRL-${Math.floor(Math.random() * 1000)}`;
 
       const trailerNumber = normalizeTrailerNumber(rawTrailerNum);
       const event = templateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
-      const defectRaw = extractInput(s.inputs, 'Visible damage') || extractInput(s.inputs, 'Any damage or defect found?');
+      const defectRaw = extractField(s.fields, s.inputs, 'damage') || extractField(s.fields, s.inputs, 'defect');
       const defectLevel = (VALID_DEFECT_LEVELS as readonly string[]).includes(defectRaw)
         ? (defectRaw as SamsaraFormSubmission['defectLevel'])
         : 'No';
+
+      // Driver name: real API has submittedBy.name, mock has driver.name
+      const driverName = s.submittedBy?.name || s.driver?.name || extractField(s.fields, s.inputs, "Submitter's Name") || 'Unknown Driver';
 
       newSubmissions.push({
         id: s.id,
         templateId,
         event: event as 'DROP' | 'PICK',
-        driverName: s.driver?.name || 'Unknown Driver',
+        driverName,
         trailerNumber,
-        location: locationToString(s.location) || extractInput(s.inputs, 'Location Address') || 'Unknown Location',
-        submittedAt: s.submittedAt || new Date().toISOString(),
+        location: locationToString(s.location) || extractField(s.fields, s.inputs, 'Location Address') || extractField(s.fields, s.inputs, 'GPS Location') || 'Unknown Location',
+        submittedAt: s.submittedAtTime || s.submittedAt || new Date().toISOString(),
         condition: (s.condition as SamsaraFormSubmission['condition']) || 'Good',
         notes: s.notes || '',
-        customerName: extractInput(s.inputs, 'Job / Stop / Customer / Yard'),
-        dropLocationDesc: extractInput(s.inputs, 'Drop location description'),
-        gpsAddress: extractInput(s.inputs, 'Location Address'),
+        customerName: extractField(s.fields, s.inputs, 'Job / Stop / Customer / Yard'),
+        dropLocationDesc: extractField(s.fields, s.inputs, 'Drop location description'),
+        gpsAddress: extractField(s.fields, s.inputs, 'Location Address') || extractField(s.fields, s.inputs, 'GPS Location'),
         defectLevel,
-        defectNotes: extractInput(s.inputs, 'If yes, please specify'),
-        accessoryNotes: extractInput(s.inputs, 'Accessories left with trailer'),
-        photoUrls: extractPhotos(s.media),
+        defectNotes: extractField(s.fields, s.inputs, 'If yes, please specify'),
+        accessoryNotes: extractField(s.fields, s.inputs, 'Accessories left with trailer'),
+        photoUrls: extractFieldPhotos(s.fields, s.media),
       });
     }
 
