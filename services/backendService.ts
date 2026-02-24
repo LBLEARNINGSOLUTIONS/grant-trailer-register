@@ -11,6 +11,7 @@ interface SamsaraRawField {
   numberValue?: { value?: number };
   multipleChoiceValue?: { selected?: string[] };
   mediaValue?: { mediaList?: { id: string; url: string; processingStatus?: string }[] };
+  assetValue?: { id?: string; name?: string; serial?: string };
 }
 
 interface SamsaraRawSubmission {
@@ -55,6 +56,8 @@ function extractField(fields: SamsaraRawField[] | undefined, inputs: { label: st
     const match = fields.find(f => f.label.toLowerCase().includes(label.toLowerCase()));
     if (match) {
       if (match.stringValue != null) return match.stringValue;
+      if (match.assetValue?.name) return match.assetValue.name;
+      if (match.assetValue?.serial) return match.assetValue.serial;
       if (match.numberValue?.value != null) return String(match.numberValue.value);
       if (match.multipleChoiceValue?.selected?.length) return match.multipleChoiceValue.selected.join(', ');
       return '';
@@ -151,7 +154,7 @@ const initDB = () => {
 };
 
 // Migration version — bump this to force a full re-sync (clears stored submissions)
-const MIGRATION_VERSION = 4;
+const MIGRATION_VERSION = 5;
 const STORAGE_KEY_MIGRATION = 'grant_migration_version';
 
 /** Check if a location string is too vague (e.g. just a state name like "Idaho") */
@@ -494,10 +497,16 @@ async function syncSamsara() {
       const templateId = s.formTemplate?.id ?? s.formTemplateId ?? '';
       if (templateId !== DROP_TEMPLATE_UUID && templateId !== PICK_TEMPLATE_UUID) continue;
 
+      // Debug: log the trailer number field to see its type and value structure
+      if (s.fields) {
+        const trailerField = s.fields.find(f => f.label.toLowerCase().includes('trailer'));
+        if (trailerField) console.log('[Samsara] Trailer field raw:', JSON.stringify(trailerField));
+      }
+
       const rawTrailerNum =
+        extractField(s.fields, s.inputs, 'Trailer Number') ||
         extractField(s.fields, s.inputs, 'select an asset') ||
         extractField(s.fields, s.inputs, 'Trailer # (enter exactly as on trailer)') ||
-        extractField(s.fields, s.inputs, 'Trailer Number') ||
         s.trailerNumber ||
         `TRL-${Math.floor(Math.random() * 1000)}`;
 
