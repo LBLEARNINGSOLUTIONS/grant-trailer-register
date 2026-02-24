@@ -4,7 +4,7 @@ import OwnerDashboard from './components/OwnerDashboard';
 import AdminPanel from './components/AdminPanel';
 import FullScreenBoard from './components/FullScreenBoard';
 import { AppMode } from './types';
-import { triggerSamsaraSync } from './services/backendService';
+import { triggerSamsaraSync, migrateCoordinateLocations } from './services/backendService';
 
 const SYNC_INTERVAL_MS = 120_000; // sync Samsara every 2 minutes
 
@@ -13,7 +13,8 @@ const App: React.FC = () => {
 
   // Background sync — runs on mount and every 2 minutes regardless of active tab
   useEffect(() => {
-    triggerSamsaraSync();
+    // Geocode any existing coordinate-only locations, then sync
+    migrateCoordinateLocations().then(() => triggerSamsaraSync());
     const interval = setInterval(triggerSamsaraSync, SYNC_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);

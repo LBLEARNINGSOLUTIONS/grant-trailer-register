@@ -102,12 +102,12 @@ function locationToString(loc: SamsaraRawSubmission['location']): string {
 /** Reverse-geocode lat,lng to a street address using free OpenStreetMap Nominatim API */
 async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   try {
-    const resp = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
-      { headers: { 'User-Agent': 'LBTrailerSystem/1.0' } }
-    );
-    if (!resp.ok) return null;
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&email=admin@lbtrailersystem.com`;
+    console.log('[Geocode] Requesting:', url);
+    const resp = await fetch(url);
+    if (!resp.ok) { console.log('[Geocode] Failed:', resp.status); return null; }
     const data = await resp.json();
+    console.log('[Geocode] Result:', data.display_name);
     // Build a concise address from parts
     const a = data.address;
     if (!a) return data.display_name || null;
@@ -140,6 +140,30 @@ const initDB = () => {
   }
   updateDerivedOpenTrailers();
 };
+
+/** One-time migration: geocode any stored submissions that still have coordinate-only locations */
+export async function migrateCoordinateLocations(): Promise<number> {
+  const data = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+  if (!data) return 0;
+  const subs: SamsaraFormSubmission[] = JSON.parse(data);
+  let fixed = 0;
+  for (const sub of subs) {
+    const coords = looksLikeCoordinates(sub.location);
+    if (coords) {
+      const address = await reverseGeocode(coords.lat, coords.lng);
+      if (address) {
+        sub.location = address;
+        fixed++;
+      }
+    }
+  }
+  if (fixed > 0) {
+    localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(subs));
+    updateDerivedOpenTrailers();
+    console.log(`[Migration] Geocoded ${fixed} coordinate-only locations to addresses`);
+  }
+  return fixed;
+}
 
 const sanitizeSubmission = (s: SamsaraFormSubmission): SamsaraFormSubmission => ({
   ...s,
