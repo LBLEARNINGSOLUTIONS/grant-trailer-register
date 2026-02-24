@@ -151,7 +151,7 @@ const initDB = () => {
 };
 
 // Migration version — bump this to force a full re-sync (clears stored submissions)
-const MIGRATION_VERSION = 2;
+const MIGRATION_VERSION = 3;
 const STORAGE_KEY_MIGRATION = 'grant_migration_version';
 
 /** Check if a location string is too vague (e.g. just a state name like "Idaho") */
@@ -420,8 +420,31 @@ const mockSamsaraStreamResponse = async (_cursor: string | null): Promise<Samsar
   return { data, pagination: { hasNextPage: false, endCursor: crypto.randomUUID() } };
 };
 
+/** Fetch all drivers from Samsara and return a map of id → name */
+async function fetchDriverMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const resp = await fetch(new URL('/api/samsara-drivers', window.location.origin).toString());
+    if (!resp.ok) return map;
+    const data = await resp.json();
+    const drivers = data.data ?? data;
+    if (Array.isArray(drivers)) {
+      for (const d of drivers) {
+        if (d.id && d.name) map.set(d.id, d.name);
+      }
+    }
+    console.log(`[Samsara] Loaded ${map.size} driver names`);
+  } catch (e) {
+    console.log('[Samsara] Could not fetch drivers:', e);
+  }
+  return map;
+}
+
 async function syncSamsara() {
   initDB();
+
+  // Fetch driver name lookup table
+  const driverMap = await fetchDriverMap();
 
   // Use last sync time as startTime so we only fetch new submissions.
   // Cursors are used within a single sync for pagination but never persisted
@@ -484,8 +507,8 @@ async function syncSamsara() {
         ? (defectRaw as SamsaraFormSubmission['defectLevel'])
         : 'No';
 
-      // Driver name: real API has submittedBy.name, mock has driver.name
-      const driverName = s.submittedBy?.name || s.driver?.name || extractField(s.fields, s.inputs, "Submitter's Name") || 'Unknown Driver';
+      // Driver name: look up from driver map by ID, fall back to submittedBy.name / mock driver.name
+      const driverName = (s.submittedBy?.id && driverMap.get(s.submittedBy.id)) || s.submittedBy?.name || s.driver?.name || extractField(s.fields, s.inputs, "Submitter's Name") || 'Unknown Driver';
 
       const rawCoords = extractLatLng(s.location);
 
