@@ -297,7 +297,17 @@ async function syncSamsara() {
         throw new Error(`API Error: ${resp.status} ${errText}`);
       }
       body = await resp.json();
-      if (body.data.length > 0) console.log('[Samsara raw sample]', JSON.stringify(body.data[0]).slice(0, 600));
+      console.log('[Samsara] Got', body.data.length, 'records from API');
+      if (body.data.length > 0) {
+        console.log('[Samsara raw sample]', JSON.stringify(body.data[0]).slice(0, 800));
+        // Log all template IDs so we can see what's coming in
+        body.data.forEach((r: any, i: number) => {
+          const tid = r.formTemplate?.id ?? r.formTemplateId ?? 'NONE';
+          console.log(`[Samsara record ${i}] templateId=${tid}, formTemplate=`, r.formTemplate, 'formTemplateId=', r.formTemplateId);
+        });
+        console.log('[Samsara] Expected DROP_TEMPLATE_UUID:', DROP_TEMPLATE_UUID);
+        console.log('[Samsara] Expected PICK_TEMPLATE_UUID:', PICK_TEMPLATE_UUID);
+      }
     } catch (e) {
       console.log('Using Mock Samsara Stream due to:', e);
       useMock = true;
