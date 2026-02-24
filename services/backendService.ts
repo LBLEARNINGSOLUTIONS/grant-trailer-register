@@ -151,7 +151,7 @@ const initDB = () => {
 };
 
 // Migration version — bump this to force a full re-sync (clears stored submissions)
-const MIGRATION_VERSION = 3;
+const MIGRATION_VERSION = 4;
 const STORAGE_KEY_MIGRATION = 'grant_migration_version';
 
 /** Check if a location string is too vague (e.g. just a state name like "Idaho") */
@@ -495,6 +495,7 @@ async function syncSamsara() {
       if (templateId !== DROP_TEMPLATE_UUID && templateId !== PICK_TEMPLATE_UUID) continue;
 
       const rawTrailerNum =
+        extractField(s.fields, s.inputs, 'select an asset') ||
         extractField(s.fields, s.inputs, 'Trailer # (enter exactly as on trailer)') ||
         extractField(s.fields, s.inputs, 'Trailer Number') ||
         s.trailerNumber ||
