@@ -99,6 +99,13 @@ function locationToString(loc: SamsaraRawSubmission['location']): string {
   return loc.address || (loc.latitude != null ? `${loc.latitude}, ${loc.longitude}` : '');
 }
 
+/** Extract raw lat/lng from a Samsara location object */
+function extractLatLng(loc: SamsaraRawSubmission['location']): { lat: number; lng: number } | null {
+  if (!loc || typeof loc === 'string') return null;
+  if (loc.latitude != null && loc.longitude != null) return { lat: loc.latitude, lng: loc.longitude };
+  return null;
+}
+
 /** Reverse-geocode lat,lng to a street address using free OpenStreetMap Nominatim API */
 async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   try {
@@ -143,6 +150,10 @@ const initDB = () => {
   updateDerivedOpenTrailers();
 };
 
+// Migration version — bump this to force a full re-sync (clears stored submissions)
+const MIGRATION_VERSION = 2;
+const STORAGE_KEY_MIGRATION = 'grant_migration_version';
+
 /** Check if a location string is too vague (e.g. just a state name like "Idaho") */
 function isVagueLocation(loc: string): boolean {
   if (!loc || loc === 'Unknown Location') return false; // skip empty/unknown — nothing to improve
@@ -154,6 +165,17 @@ function isVagueLocation(loc: string): boolean {
 
 /** Migration: geocode any stored submissions that still have coordinate-only or vague locations */
 export async function migrateCoordinateLocations(): Promise<number> {
+  // Check if we need a full re-sync (migration version bump)
+  const storedVersion = parseInt(localStorage.getItem(STORAGE_KEY_MIGRATION) || '0', 10);
+  if (storedVersion < MIGRATION_VERSION) {
+    console.log(`[Migration] Version ${storedVersion} → ${MIGRATION_VERSION}: clearing stored data for full re-sync`);
+    localStorage.removeItem(STORAGE_KEY_SUBMISSIONS);
+    localStorage.removeItem(STORAGE_KEY_TRAILERS);
+    localStorage.removeItem(STORAGE_KEY_LAST_SYNC);
+    localStorage.setItem(STORAGE_KEY_MIGRATION, String(MIGRATION_VERSION));
+    return 0; // data cleared — next sync will re-fetch and geocode properly
+  }
+
   const data = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
   if (!data) return 0;
   const subs: SamsaraFormSubmission[] = JSON.parse(data);
@@ -169,11 +191,17 @@ export async function migrateCoordinateLocations(): Promise<number> {
       }
       continue;
     }
-    // Case 2: location is too vague (e.g. "Idaho") — try re-geocoding from gpsAddress field
-    if (isVagueLocation(sub.location) && sub.gpsAddress) {
-      const gpsCoords = looksLikeCoordinates(sub.gpsAddress);
-      if (gpsCoords) {
-        const address = await reverseGeocode(gpsCoords.lat, gpsCoords.lng);
+    // Case 2: location is too vague (e.g. "Idaho") — try re-geocoding from stored coordinates
+    if (isVagueLocation(sub.location)) {
+      // Try rawLat/rawLng first (most reliable), then gpsAddress
+      let reCoords: { lat: number; lng: number } | null = null;
+      if (sub.rawLat != null && sub.rawLng != null) {
+        reCoords = { lat: sub.rawLat, lng: sub.rawLng };
+      } else if (sub.gpsAddress) {
+        reCoords = looksLikeCoordinates(sub.gpsAddress);
+      }
+      if (reCoords) {
+        const address = await reverseGeocode(reCoords.lat, reCoords.lng);
         if (address && !isVagueLocation(address)) {
           sub.location = address;
           fixed++;
@@ -459,6 +487,8 @@ async function syncSamsara() {
       // Driver name: real API has submittedBy.name, mock has driver.name
       const driverName = s.submittedBy?.name || s.driver?.name || extractField(s.fields, s.inputs, "Submitter's Name") || 'Unknown Driver';
 
+      const rawCoords = extractLatLng(s.location);
+
       newSubmissions.push({
         id: s.id,
         templateId,
@@ -476,6 +506,8 @@ async function syncSamsara() {
         defectNotes: extractField(s.fields, s.inputs, 'If yes, please specify'),
         accessoryNotes: extractField(s.fields, s.inputs, 'Accessories left with trailer'),
         photoUrls: extractFieldPhotos(s.fields, s.media),
+        rawLat: rawCoords?.lat,
+        rawLng: rawCoords?.lng,
       });
     }
 

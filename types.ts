@@ -39,6 +39,9 @@ export interface SamsaraFormSubmission {
   defectNotes?: string;
   accessoryNotes?: string;
   photoUrls?: string[];
+  // Raw coordinates preserved for re-geocoding
+  rawLat?: number;
+  rawLng?: number;
 }
 
 export interface SyncLog {
