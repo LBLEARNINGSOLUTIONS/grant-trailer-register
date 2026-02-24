@@ -102,20 +102,22 @@ function locationToString(loc: SamsaraRawSubmission['location']): string {
 /** Reverse-geocode lat,lng to a street address using free OpenStreetMap Nominatim API */
 async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&email=admin@lbtrailersystem.com`;
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&email=admin@lbtrailersystem.com`;
     console.log('[Geocode] Requesting:', url);
     const resp = await fetch(url);
     if (!resp.ok) { console.log('[Geocode] Failed:', resp.status); return null; }
     const data = await resp.json();
     console.log('[Geocode] Result:', data.display_name);
-    // Build a concise address from parts
     const a = data.address;
     if (!a) return data.display_name || null;
-    const parts = [
-      a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road,
-      a.city || a.town || a.village,
-      a.state,
-    ].filter(Boolean);
+    // Build a specific address from all available components
+    const street = a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road;
+    const locality = a.city || a.town || a.village || a.hamlet || a.suburb || a.neighbourhood || a.county;
+    const parts = [street, locality, a.state].filter(Boolean);
+    // If we only got state (e.g. "Idaho"), use Nominatim's full display_name instead
+    if (parts.length <= 1 && data.display_name) {
+      return data.display_name;
+    }
     return parts.length > 0 ? parts.join(', ') : data.display_name || null;
   } catch {
     return null;
@@ -141,13 +143,23 @@ const initDB = () => {
   updateDerivedOpenTrailers();
 };
 
-/** One-time migration: geocode any stored submissions that still have coordinate-only locations */
+/** Check if a location string is too vague (e.g. just a state name like "Idaho") */
+function isVagueLocation(loc: string): boolean {
+  if (!loc || loc === 'Unknown Location') return false; // skip empty/unknown — nothing to improve
+  // If it's a single word or very short with no comma, it's likely just a state/country
+  const trimmed = loc.trim();
+  if (!trimmed.includes(',') && trimmed.split(/\s+/).length <= 2) return true;
+  return false;
+}
+
+/** Migration: geocode any stored submissions that still have coordinate-only or vague locations */
 export async function migrateCoordinateLocations(): Promise<number> {
   const data = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
   if (!data) return 0;
   const subs: SamsaraFormSubmission[] = JSON.parse(data);
   let fixed = 0;
   for (const sub of subs) {
+    // Case 1: location is still raw coordinates
     const coords = looksLikeCoordinates(sub.location);
     if (coords) {
       const address = await reverseGeocode(coords.lat, coords.lng);
@@ -155,12 +167,24 @@ export async function migrateCoordinateLocations(): Promise<number> {
         sub.location = address;
         fixed++;
       }
+      continue;
+    }
+    // Case 2: location is too vague (e.g. "Idaho") — try re-geocoding from gpsAddress field
+    if (isVagueLocation(sub.location) && sub.gpsAddress) {
+      const gpsCoords = looksLikeCoordinates(sub.gpsAddress);
+      if (gpsCoords) {
+        const address = await reverseGeocode(gpsCoords.lat, gpsCoords.lng);
+        if (address && !isVagueLocation(address)) {
+          sub.location = address;
+          fixed++;
+        }
+      }
     }
   }
   if (fixed > 0) {
     localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(subs));
     updateDerivedOpenTrailers();
-    console.log(`[Migration] Geocoded ${fixed} coordinate-only locations to addresses`);
+    console.log(`[Migration] Re-geocoded ${fixed} vague/coordinate locations to specific addresses`);
   }
   return fixed;
 }
