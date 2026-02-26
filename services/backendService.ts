@@ -513,9 +513,8 @@ async function syncSamsara() {
       const trailerNumber = normalizeTrailerNumber(rawTrailerNum);
       const event = templateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
       const defectRaw = extractField(s.fields, s.inputs, 'damage') || extractField(s.fields, s.inputs, 'defect');
-      const defectLevel = (VALID_DEFECT_LEVELS as readonly string[]).includes(defectRaw)
-        ? (defectRaw as SamsaraFormSubmission['defectLevel'])
-        : 'No';
+      const defectMatch = VALID_DEFECT_LEVELS.find(v => v.toLowerCase() === defectRaw.toLowerCase());
+      const defectLevel: SamsaraFormSubmission['defectLevel'] = defectMatch ?? 'No';
 
       // Driver name: look up from driver map by ID, fall back to submittedBy.name / mock driver.name
       const driverName = (s.submittedBy?.id && driverMap.get(s.submittedBy.id)) || s.submittedBy?.name || s.driver?.name || extractField(s.fields, s.inputs, "Submitter's Name") || 'Unknown Driver';
@@ -537,7 +536,7 @@ async function syncSamsara() {
         gpsAddress: extractField(s.fields, s.inputs, 'Location Address') || extractField(s.fields, s.inputs, 'GPS Location'),
         defectLevel,
         defectNotes: extractField(s.fields, s.inputs, 'If yes, please specify'),
-        accessoryNotes: extractField(s.fields, s.inputs, 'Accessories left with trailer'),
+        accessoryNotes: extractField(s.fields, s.inputs, 'Accessories present on trailer') || extractField(s.fields, s.inputs, 'Accessories left with trailer'),
         photoUrls: extractFieldPhotos(s.fields, s.media),
         rawLat: rawCoords?.lat,
         rawLng: rawCoords?.lng,
