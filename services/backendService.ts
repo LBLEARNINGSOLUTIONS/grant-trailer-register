@@ -60,6 +60,18 @@ function extractField(fields: SamsaraRawField[] | undefined, inputs: { label: st
       if (match.assetValue?.serial) return match.assetValue.serial;
       if (match.numberValue?.value != null) return String(match.numberValue.value);
       if (match.multipleChoiceValue?.selected?.length) return match.multipleChoiceValue.selected.join(', ');
+      // Catch-all: Samsara may use keys we haven't mapped (e.g. Asset fields)
+      const known = new Set(['id', 'label', 'type', 'stringValue', 'numberValue', 'multipleChoiceValue', 'mediaValue', 'assetValue']);
+      for (const [key, val] of Object.entries(match)) {
+        if (known.has(key)) continue;
+        if (typeof val === 'string' && val) return val;
+        if (val && typeof val === 'object') {
+          const obj = val as Record<string, unknown>;
+          const extracted = obj.name ?? obj.value ?? obj.serial ?? obj.displayName;
+          if (typeof extracted === 'string' && extracted) return extracted;
+        }
+      }
+      console.log(`[extractField] Matched label "${label}" but could not extract value. Full field:`, JSON.stringify(match));
       return '';
     }
   }
@@ -154,7 +166,7 @@ const initDB = () => {
 };
 
 // Migration version — bump this to force a full re-sync (clears stored submissions)
-const MIGRATION_VERSION = 5;
+const MIGRATION_VERSION = 6;
 const STORAGE_KEY_MIGRATION = 'grant_migration_version';
 
 /** Check if a location string is too vague (e.g. just a state name like "Idaho") */
