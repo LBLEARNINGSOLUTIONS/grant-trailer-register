@@ -92,8 +92,7 @@ export default function FullScreenBoard({ onExit }: Props) {
             <thead className="sticky top-0 z-10 bg-slate-900 border-b border-slate-700">
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Trailer #</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Customer / Job</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Drop Location</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Location</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Driver</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Dropped At</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Age</th>
@@ -107,8 +106,7 @@ export default function FullScreenBoard({ onExit }: Props) {
                 return (
                   <tr key={t.id} className={`border-b ${TIER_ROW[age.tier]} transition-colors`}>
                     <td className="px-6 py-4 text-xl font-bold font-mono">{t.id}</td>
-                    <td className="px-6 py-4 text-base text-slate-200">{t.customerName || '—'}</td>
-                    <td className="px-6 py-4 text-sm text-slate-300">{t.dropLocationDesc || t.location || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-300">{t.location || '—'}</td>
                     <td className="px-6 py-4 text-sm text-slate-300">{t.droppedBy || '—'}</td>
                     <td className="px-6 py-4 text-sm text-slate-400 whitespace-nowrap">
                       {new Date(t.lastUpdated).toLocaleString()}
