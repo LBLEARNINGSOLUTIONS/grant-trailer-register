@@ -8,13 +8,7 @@ export const DEEP_LINK_PICK = `samsaradriver://navigate/forms_submission_page/${
 
 // Master list of valid trailer numbers.
 // Add real trailer numbers here to enable "unknown trailer" data issue detection.
-export const TRAILER_MASTER_LIST: string[] = [
-  'TRL-501',
-  'TRL-502',
-  'TRL-503',
-  'TRL-504',
-  'TRL-505',
-];
+export const TRAILER_MASTER_LIST: string[] = [];
 
 export const MOCK_TRAILERS = [
   { id: 'TRL-501', status: 'DROPPED', location: 'Distribution Center A', lastUpdated: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), droppedBy: 'John Doe', condition: 'Good', customerName: 'Acme Corp', dropLocationDesc: 'Dock #3, north side' },

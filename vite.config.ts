@@ -23,6 +23,17 @@ export default defineConfig(({ mode }) => {
             });
           },
         },
+        '/api/samsara-drivers': {
+          target: 'https://api.samsara.com',
+          changeOrigin: true,
+          rewrite: () => '/fleet/drivers',
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq) => {
+              proxyReq.setHeader('Authorization', `Bearer ${env.VITE_SAMSARA_API_TOKEN}`);
+              proxyReq.path = '/fleet/drivers';
+            });
+          },
+        },
       },
     },
     plugins: [react()],
