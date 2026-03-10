@@ -1,29 +1,39 @@
-export default async function handler(req: any, res: any) {
+export default async function handler(_req: any, res: any) {
   const token = process.env.VITE_SAMSARA_API_TOKEN;
   if (!token) {
     res.status(500).json({ error: 'No API token configured' });
     return;
   }
 
-  const url = new URL('https://api.samsara.com/fleet/assets');
+  // Samsara splits assets across multiple endpoints — fetch all and merge
+  const endpoints = [
+    'https://api.samsara.com/fleet/trailers',
+    'https://api.samsara.com/fleet/equipment',
+    'https://api.samsara.com/fleet/vehicles',
+  ];
 
-  // Forward query params (e.g. tag filters, pagination)
-  const query = req.query as Record<string, string | string[]>;
-  for (const [key, value] of Object.entries(query)) {
-    if (Array.isArray(value)) {
-      value.forEach(v => url.searchParams.append(key, v));
-    } else {
-      url.searchParams.set(key, value);
+  const allAssets: { id: string; name: string; source: string }[] = [];
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) continue;
+      const body = await response.json();
+      const items = body.data ?? body;
+      const source = endpoint.split('/').pop() ?? 'unknown';
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          if (item.id && item.name) {
+            allAssets.push({ id: String(item.id), name: item.name, source });
+          }
+        }
+      }
+    } catch {
+      // Skip failed endpoints
     }
   }
 
-  try {
-    const response = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await response.json();
-    res.status(response.status).json(data);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message ?? 'Proxy error' });
-  }
+  res.status(200).json({ data: allAssets, count: allAssets.length });
 }
