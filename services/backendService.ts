@@ -56,11 +56,21 @@ function extractField(fields: SamsaraRawField[] | undefined, inputs: { label: st
     const match = fields.find(f => f.label.toLowerCase().includes(label.toLowerCase()));
     if (match) {
       if (match.stringValue != null && match.stringValue !== '') return match.stringValue;
-      // Asset fields: try name, serial, id, or any nested string
+      // Asset fields: Samsara nests the value under assetValue.asset
       if (match.assetValue) {
         const av = match.assetValue as Record<string, unknown>;
-        const assetStr = av.name ?? av.serial ?? av.displayName ?? av.value ?? av.id;
-        if (typeof assetStr === 'string' && assetStr) return assetStr;
+        // Direct properties
+        for (const prop of ['name', 'serial', 'displayName', 'value']) {
+          if (typeof av[prop] === 'string' && av[prop]) return av[prop] as string;
+        }
+        // Nested under .asset (real Samsara structure)
+        const asset = av.asset as Record<string, unknown> | undefined;
+        if (asset) {
+          if (typeof asset.name === 'string' && asset.name) return asset.name;
+          if (typeof asset.id === 'string' && asset.id) return `__ASSET_ID__${asset.id}`;
+        }
+        // Last resort: the assetValue.id itself
+        if (typeof av.id === 'string' && av.id) return av.id;
       }
       if (match.numberValue?.value != null) return String(match.numberValue.value);
       if (match.multipleChoiceValue?.selected?.length) return match.multipleChoiceValue.selected.join(', ');
@@ -437,6 +447,26 @@ const mockSamsaraStreamResponse = async (_cursor: string | null): Promise<Samsar
   return { data, pagination: { hasNextPage: false, endCursor: crypto.randomUUID() } };
 };
 
+/** Fetch all assets (trailers) from Samsara and return a map of id → name */
+async function fetchAssetMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const resp = await fetch(new URL('/api/samsara-assets', window.location.origin).toString());
+    if (!resp.ok) return map;
+    const data = await resp.json();
+    const assets = data.data ?? data;
+    if (Array.isArray(assets)) {
+      for (const a of assets) {
+        if (a.id && a.name) map.set(String(a.id), a.name);
+      }
+    }
+    console.log(`[Samsara] Loaded ${map.size} asset names`);
+  } catch (e) {
+    console.log('[Samsara] Could not fetch assets:', e);
+  }
+  return map;
+}
+
 /** Fetch all drivers from Samsara and return a map of id → name */
 async function fetchDriverMap(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
@@ -471,8 +501,8 @@ interface SyncDiagnostics {
 async function syncSamsara(): Promise<{ count: number; diagnostics: SyncDiagnostics }> {
   initDB();
 
-  // Fetch driver name lookup table
-  const driverMap = await fetchDriverMap();
+  // Fetch driver and asset name lookup tables
+  const [driverMap, assetMap] = await Promise.all([fetchDriverMap(), fetchAssetMap()]);
 
   // Use last sync time as startTime so we only fetch new submissions.
   const lastSync = localStorage.getItem(STORAGE_KEY_LAST_SYNC);
@@ -543,13 +573,26 @@ async function syncSamsara(): Promise<{ count: number; diagnostics: SyncDiagnost
         s.trailerNumber ||
         '';
 
-      if (!rawTrailerNum) {
-        // Dump the FULL trailer field JSON (with values, not just keys) for debugging
+      // Resolve asset IDs to names using the asset lookup table
+      let resolvedTrailerNum = rawTrailerNum;
+      if (resolvedTrailerNum.startsWith('__ASSET_ID__')) {
+        const assetId = resolvedTrailerNum.replace('__ASSET_ID__', '');
+        const assetName = assetMap.get(assetId);
+        if (assetName) {
+          resolvedTrailerNum = assetName;
+          console.log(`[Samsara] Resolved asset ID ${assetId} → "${assetName}"`);
+        } else {
+          console.warn(`[Samsara] Asset ID ${assetId} not found in asset map (${assetMap.size} assets loaded)`);
+          resolvedTrailerNum = ''; // treat as failed extraction
+        }
+      }
+
+      if (!resolvedTrailerNum) {
         diag.failedExtractions.push({ submissionId: s.id, fieldDump: trailerFieldDump });
         console.warn('[Samsara] Could not extract trailer number. Trailer field:', trailerFieldDump);
       }
 
-      const trailerNumber = rawTrailerNum ? normalizeTrailerNumber(rawTrailerNum) : `UNKNOWN-${s.id.slice(0, 6).toUpperCase()}`;
+      const trailerNumber = resolvedTrailerNum ? normalizeTrailerNumber(resolvedTrailerNum) : `UNKNOWN-${s.id.slice(0, 6).toUpperCase()}`;
       diag.extractedTrailers.push(`${trailerNumber} (raw: "${rawTrailerNum || 'EMPTY'}")`);
 
       const event = templateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
