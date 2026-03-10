@@ -30,9 +30,7 @@ export default function TrailerHistoryModal({ trailer, onClose }: Props) {
         <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between shrink-0">
           <div>
             <h2 className="text-xl font-bold text-slate-800">{trailer.id}</h2>
-            {trailer.customerName && (
-              <p className="text-sm text-slate-500 mt-0.5">{trailer.customerName}</p>
-            )}
+            <p className="text-sm text-slate-500 mt-0.5">{trailer.location}</p>
           </div>
           <button
             onClick={onClose}
@@ -82,13 +80,7 @@ export default function TrailerHistoryModal({ trailer, onClose }: Props) {
 
                   <p className="text-sm font-medium text-slate-700">{event.driverName}</p>
 
-                  {event.customerName && (
-                    <p className="text-sm text-slate-500">{event.customerName}</p>
-                  )}
-
-                  {event.dropLocationDesc && (
-                    <p className="text-sm text-slate-500">{event.dropLocationDesc}</p>
-                  )}
+                  <p className="text-sm text-slate-500">{event.location}</p>
 
                   {event.defectLevel && event.defectLevel !== 'No' && (
                     <div className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200">

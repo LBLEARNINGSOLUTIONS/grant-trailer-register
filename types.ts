@@ -14,8 +14,6 @@ export interface TrailerStatus {
   notes?: string;
   condition?: 'Good' | 'Damaged' | 'Needs Service';
   // Extended fields from Samsara form
-  customerName?: string;
-  dropLocationDesc?: string;
   defectLevel?: 'No' | 'Yes (minor)' | 'Yes (needs attention)';
   defectNotes?: string;
   photoUrls?: string[];
@@ -32,8 +30,6 @@ export interface SamsaraFormSubmission {
   notes?: string;
   condition?: 'Good' | 'Damaged' | 'Needs Service';
   // Extended fields from Samsara form inputs
-  customerName?: string;
-  dropLocationDesc?: string;
   gpsAddress?: string;
   defectLevel?: 'No' | 'Yes (minor)' | 'Yes (needs attention)';
   defectNotes?: string;

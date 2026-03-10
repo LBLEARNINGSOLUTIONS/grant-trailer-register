@@ -166,7 +166,7 @@ const initDB = () => {
 };
 
 // Migration version — bump this to force a full re-sync (clears stored submissions)
-const MIGRATION_VERSION = 6;
+const MIGRATION_VERSION = 7;
 const STORAGE_KEY_MIGRATION = 'grant_migration_version';
 
 /** Check if a location string is too vague (e.g. just a state name like "Idaho") */
@@ -318,8 +318,6 @@ const deriveOpenTrailers = (subs: SamsaraFormSubmission[]): TrailerStatus[] => {
       droppedBy: lastDrop.driverName,
       condition: lastDrop.condition ?? 'Good',
       notes: lastDrop.notes ?? '',
-      customerName: lastDrop.customerName ?? '',
-      dropLocationDesc: lastDrop.dropLocationDesc ?? '',
       defectLevel: lastDrop.defectLevel ?? 'No',
       defectNotes: lastDrop.defectNotes ?? '',
       photoUrls: lastDrop.photoUrls ?? [],
@@ -417,13 +415,11 @@ const mockSamsaraStreamResponse = async (_cursor: string | null): Promise<Samsar
       location: isDrop ? 'Distribution Center' : 'En Route',
       submittedAt: new Date().toISOString(),
       inputs: isDrop ? [
-        { label: 'Job / Stop / Customer / Yard', value: 'Simulated Customer' },
-        { label: 'Trailer # (enter exactly as on trailer)', value: trailerNum },
-        { label: 'Drop location description', value: 'Dock #1' },
+        { label: 'Trailer Number', value: trailerNum },
+        { label: 'Accessories left with trailer?', value: 'TARPS, STRAPS' },
         { label: 'Any damage or defect found?', value: defectLevel },
         { label: 'If yes, please specify', value: defectLevel !== 'No' ? 'Minor scuff on side panel' : '' },
       ] : [
-        { label: 'Job / Stop / Customer / Yard', value: 'Simulated Customer' },
         { label: 'Trailer Number', value: trailerNum },
         { label: 'Visible damage', value: defectLevel },
         { label: 'If yes, please specify here', value: defectLevel !== 'No' ? 'Minor scuff on side panel' : '' },
@@ -520,7 +516,12 @@ async function syncSamsara() {
         extractField(s.fields, s.inputs, 'select an asset') ||
         extractField(s.fields, s.inputs, 'Trailer # (enter exactly as on trailer)') ||
         s.trailerNumber ||
-        `TRL-${Math.floor(Math.random() * 1000)}`;
+        '';
+
+      if (!rawTrailerNum) {
+        console.warn('[Samsara] Could not extract trailer number from submission', s.id, '— skipping. Fields:', JSON.stringify(s.fields?.map(f => ({ label: f.label, type: f.type, keys: Object.keys(f) }))));
+        continue;
+      }
 
       const trailerNumber = normalizeTrailerNumber(rawTrailerNum);
       const event = templateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
@@ -543,8 +544,6 @@ async function syncSamsara() {
         submittedAt: s.submittedAtTime || s.submittedAt || new Date().toISOString(),
         condition: (s.condition as SamsaraFormSubmission['condition']) || 'Good',
         notes: s.notes || '',
-        customerName: extractField(s.fields, s.inputs, 'Job / Stop / Customer / Yard'),
-        dropLocationDesc: extractField(s.fields, s.inputs, 'Drop location description'),
         gpsAddress: extractField(s.fields, s.inputs, 'Location Address') || extractField(s.fields, s.inputs, 'GPS Location'),
         defectLevel,
         defectNotes: extractField(s.fields, s.inputs, 'If yes, please specify'),
