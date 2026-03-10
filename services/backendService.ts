@@ -172,7 +172,7 @@ const initDB = () => {
 };
 
 // Migration version — bump this to force a full re-sync (clears stored submissions)
-const MIGRATION_VERSION = 7;
+const MIGRATION_VERSION = 8;
 const STORAGE_KEY_MIGRATION = 'grant_migration_version';
 
 /** Check if a location string is too vague (e.g. just a state name like "Idaho") */
@@ -461,6 +461,7 @@ interface SyncDiagnostics {
   totalApiRecords: number;
   matchedTemplates: number;
   skippedTemplates: number;
+  skippedTemplateIds: string[];
   extractedTrailers: string[];
   failedExtractions: { submissionId: string; fieldDump: string }[];
   usedMock: boolean;
@@ -489,6 +490,7 @@ async function syncSamsara(): Promise<{ count: number; diagnostics: SyncDiagnost
     totalApiRecords: 0,
     matchedTemplates: 0,
     skippedTemplates: 0,
+    skippedTemplateIds: [],
     extractedTrailers: [],
     failedExtractions: [],
     usedMock: false,
@@ -522,6 +524,9 @@ async function syncSamsara(): Promise<{ count: number; diagnostics: SyncDiagnost
       const templateId = s.formTemplate?.id ?? s.formTemplateId ?? '';
       if (templateId !== DROP_TEMPLATE_UUID && templateId !== PICK_TEMPLATE_UUID) {
         diag.skippedTemplates++;
+        const formName = s.formTemplate?.name ?? 'unknown';
+        const entry = `${templateId.slice(0, 8)}… (${formName})`;
+        if (!diag.skippedTemplateIds.includes(entry)) diag.skippedTemplateIds.push(entry);
         continue;
       }
       diag.matchedTemplates++;
@@ -617,6 +622,9 @@ export const triggerSamsaraSync = async (): Promise<{ success: boolean; message:
       `API returned ${d.totalApiRecords} records (${d.matchedTemplates} matched templates, ${d.skippedTemplates} skipped).`,
       d.usedMock ? '⚠ Used MOCK data (API unreachable).' : `startTime: ${d.startTime}`,
     ];
+    if (d.skippedTemplateIds.length > 0) {
+      diagParts.push(`Skipped form templates: ${d.skippedTemplateIds.join(', ')}`);
+    }
     if (d.extractedTrailers.length > 0) {
       diagParts.push(`Trailers: ${d.extractedTrailers.join(', ')}`);
     }
