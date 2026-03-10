@@ -55,23 +55,29 @@ function extractField(fields: SamsaraRawField[] | undefined, inputs: { label: st
   if (fields) {
     const match = fields.find(f => f.label.toLowerCase().includes(label.toLowerCase()));
     if (match) {
-      if (match.stringValue != null) return match.stringValue;
-      if (match.assetValue?.name) return match.assetValue.name;
-      if (match.assetValue?.serial) return match.assetValue.serial;
+      if (match.stringValue != null && match.stringValue !== '') return match.stringValue;
+      // Asset fields: try name, serial, id, or any nested string
+      if (match.assetValue) {
+        const av = match.assetValue as Record<string, unknown>;
+        const assetStr = av.name ?? av.serial ?? av.displayName ?? av.value ?? av.id;
+        if (typeof assetStr === 'string' && assetStr) return assetStr;
+      }
       if (match.numberValue?.value != null) return String(match.numberValue.value);
       if (match.multipleChoiceValue?.selected?.length) return match.multipleChoiceValue.selected.join(', ');
-      // Catch-all: Samsara may use keys we haven't mapped (e.g. Asset fields)
+      // Catch-all: Samsara may use keys we haven't mapped
       const known = new Set(['id', 'label', 'type', 'stringValue', 'numberValue', 'multipleChoiceValue', 'mediaValue', 'assetValue']);
       for (const [key, val] of Object.entries(match)) {
         if (known.has(key)) continue;
         if (typeof val === 'string' && val) return val;
         if (val && typeof val === 'object') {
           const obj = val as Record<string, unknown>;
-          const extracted = obj.name ?? obj.value ?? obj.serial ?? obj.displayName;
-          if (typeof extracted === 'string' && extracted) return extracted;
+          // Try all common value patterns
+          for (const prop of ['name', 'value', 'serial', 'displayName', 'id', 'label', 'text']) {
+            if (typeof obj[prop] === 'string' && obj[prop]) return obj[prop] as string;
+          }
         }
       }
-      console.log(`[extractField] Matched label "${label}" but could not extract value. Full field:`, JSON.stringify(match));
+      console.warn(`[extractField] Matched label "${label}" but could not extract value. Full field:`, JSON.stringify(match));
       return '';
     }
   }
@@ -519,11 +525,10 @@ async function syncSamsara() {
         '';
 
       if (!rawTrailerNum) {
-        console.warn('[Samsara] Could not extract trailer number from submission', s.id, '— skipping. Fields:', JSON.stringify(s.fields?.map(f => ({ label: f.label, type: f.type, keys: Object.keys(f) }))));
-        continue;
+        console.warn('[Samsara] Could not extract trailer number from submission', s.id, '. Full fields dump:', JSON.stringify(s.fields));
       }
 
-      const trailerNumber = normalizeTrailerNumber(rawTrailerNum);
+      const trailerNumber = rawTrailerNum ? normalizeTrailerNumber(rawTrailerNum) : `UNKNOWN-${s.id.slice(0, 6).toUpperCase()}`;
       const event = templateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
       const defectRaw = extractField(s.fields, s.inputs, 'damage') || extractField(s.fields, s.inputs, 'defect');
       const defectMatch = VALID_DEFECT_LEVELS.find(v => v.toLowerCase() === defectRaw.toLowerCase());
