@@ -612,6 +612,14 @@ async function syncSamsara(): Promise<{ count: number; diagnostics: SyncDiagnost
   return { count: newSubmissions.length, diagnostics: diag };
 }
 
+/** Force a full re-sync: clears all stored data and fetches everything from scratch */
+export const forceFullResync = async (): Promise<{ success: boolean; message: string }> => {
+  localStorage.removeItem(STORAGE_KEY_SUBMISSIONS);
+  localStorage.removeItem(STORAGE_KEY_TRAILERS);
+  localStorage.removeItem(STORAGE_KEY_LAST_SYNC);
+  return triggerSamsaraSync();
+};
+
 export const triggerSamsaraSync = async (): Promise<{ success: boolean; message: string }> => {
   try {
     const { count, diagnostics: d } = await syncSamsara();

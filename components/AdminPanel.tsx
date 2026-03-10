@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Database, Terminal, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
-import { triggerSamsaraSync, getLogs } from '../services/backendService';
+import { triggerSamsaraSync, forceFullResync, getLogs } from '../services/backendService';
 import { SyncLog } from '../types';
 import DataIssuesView from './DataIssuesView';
 
@@ -24,6 +24,13 @@ const AdminPanel: React.FC = () => {
     refreshLogs();
   };
 
+  const handleForceResync = async () => {
+    setSyncing(true);
+    await forceFullResync();
+    setSyncing(false);
+    refreshLogs();
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto w-full overflow-y-auto h-full custom-scrollbar">
       {/* Header */}
@@ -35,16 +42,27 @@ const AdminPanel: React.FC = () => {
           <p className="text-slate-500 text-sm mt-1">Manage data synchronization with Samsara API.</p>
         </div>
 
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-white shadow-md transition-all ${
-            syncing ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 active:scale-95'
-          }`}
-        >
-          <RefreshCw className={syncing ? 'animate-spin' : ''} size={20} />
-          {syncing ? 'Syncing...' : 'Trigger Sync Now'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-white shadow-md transition-all ${
+              syncing ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 active:scale-95'
+            }`}
+          >
+            <RefreshCw className={syncing ? 'animate-spin' : ''} size={20} />
+            {syncing ? 'Syncing...' : 'Trigger Sync Now'}
+          </button>
+          <button
+            onClick={handleForceResync}
+            disabled={syncing}
+            className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium text-white shadow-md transition-all ${
+              syncing ? 'bg-slate-400 cursor-not-allowed' : 'bg-orange-600 hover:bg-orange-700 active:scale-95'
+            }`}
+          >
+            Force Full Re-sync
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
