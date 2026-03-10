@@ -544,9 +544,9 @@ async function syncSamsara(): Promise<{ count: number; diagnostics: SyncDiagnost
         '';
 
       if (!rawTrailerNum) {
-        const allFieldsDump = JSON.stringify(s.fields?.map(f => ({ label: f.label, type: f.type, keys: Object.keys(f) })) ?? 'none');
-        diag.failedExtractions.push({ submissionId: s.id, fieldDump: allFieldsDump });
-        console.warn('[Samsara] Could not extract trailer number. Trailer field:', trailerFieldDump, 'All fields:', allFieldsDump);
+        // Dump the FULL trailer field JSON (with values, not just keys) for debugging
+        diag.failedExtractions.push({ submissionId: s.id, fieldDump: trailerFieldDump });
+        console.warn('[Samsara] Could not extract trailer number. Trailer field:', trailerFieldDump);
       }
 
       const trailerNumber = rawTrailerNum ? normalizeTrailerNumber(rawTrailerNum) : `UNKNOWN-${s.id.slice(0, 6).toUpperCase()}`;
