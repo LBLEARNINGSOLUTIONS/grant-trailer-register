@@ -457,15 +457,23 @@ async function fetchDriverMap(): Promise<Map<string, string>> {
   return map;
 }
 
-async function syncSamsara() {
+interface SyncDiagnostics {
+  totalApiRecords: number;
+  matchedTemplates: number;
+  skippedTemplates: number;
+  extractedTrailers: string[];
+  failedExtractions: { submissionId: string; fieldDump: string }[];
+  usedMock: boolean;
+  startTime: string;
+}
+
+async function syncSamsara(): Promise<{ count: number; diagnostics: SyncDiagnostics }> {
   initDB();
 
   // Fetch driver name lookup table
   const driverMap = await fetchDriverMap();
 
   // Use last sync time as startTime so we only fetch new submissions.
-  // Cursors are used within a single sync for pagination but never persisted
-  // between syncs — this avoids "Parameters differ" errors from stale cursors.
   const lastSync = localStorage.getItem(STORAGE_KEY_LAST_SYNC);
   const startTime = lastSync ?? new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -476,6 +484,16 @@ async function syncSamsara() {
   const newSubmissions: SamsaraFormSubmission[] = [];
   let loopLimit = 10;
   let useMock = false;
+
+  const diag: SyncDiagnostics = {
+    totalApiRecords: 0,
+    matchedTemplates: 0,
+    skippedTemplates: 0,
+    extractedTrailers: [],
+    failedExtractions: [],
+    usedMock: false,
+    startTime,
+  };
 
   while (hasNext && loopLimit > 0) {
     loopLimit--;
@@ -490,32 +508,28 @@ async function syncSamsara() {
       }
       body = await resp.json();
       console.log('[Samsara] Got', body.data.length, 'records from API');
-      if (body.data.length > 0) {
-        console.log('[Samsara raw sample]', JSON.stringify(body.data[0]).slice(0, 800));
-        // Log all template IDs so we can see what's coming in
-        body.data.forEach((r: any, i: number) => {
-          const tid = r.formTemplate?.id ?? r.formTemplateId ?? 'NONE';
-          console.log(`[Samsara record ${i}] templateId=${tid}, formTemplate=`, r.formTemplate, 'formTemplateId=', r.formTemplateId);
-        });
-        console.log('[Samsara] Expected DROP_TEMPLATE_UUID:', DROP_TEMPLATE_UUID);
-        console.log('[Samsara] Expected PICK_TEMPLATE_UUID:', PICK_TEMPLATE_UUID);
-      }
     } catch (e) {
       console.log('Using Mock Samsara Stream due to:', e);
       useMock = true;
+      diag.usedMock = true;
       body = await mockSamsaraStreamResponse(null);
       hasNext = false;
     }
 
+    diag.totalApiRecords += body.data.length;
+
     for (const s of body.data) {
       const templateId = s.formTemplate?.id ?? s.formTemplateId ?? '';
-      if (templateId !== DROP_TEMPLATE_UUID && templateId !== PICK_TEMPLATE_UUID) continue;
-
-      // Debug: log the trailer number field to see its type and value structure
-      if (s.fields) {
-        const trailerField = s.fields.find(f => f.label.toLowerCase().includes('trailer'));
-        if (trailerField) console.log('[Samsara] Trailer field raw:', JSON.stringify(trailerField));
+      if (templateId !== DROP_TEMPLATE_UUID && templateId !== PICK_TEMPLATE_UUID) {
+        diag.skippedTemplates++;
+        continue;
       }
+      diag.matchedTemplates++;
+
+      // Log the trailer field for diagnostics
+      const trailerFieldDump = s.fields
+        ? JSON.stringify(s.fields.find(f => f.label.toLowerCase().includes('trailer')) ?? 'NO_TRAILER_FIELD')
+        : 'NO_FIELDS';
 
       const rawTrailerNum =
         extractField(s.fields, s.inputs, 'Trailer Number') ||
@@ -525,16 +539,19 @@ async function syncSamsara() {
         '';
 
       if (!rawTrailerNum) {
-        console.warn('[Samsara] Could not extract trailer number from submission', s.id, '. Full fields dump:', JSON.stringify(s.fields));
+        const allFieldsDump = JSON.stringify(s.fields?.map(f => ({ label: f.label, type: f.type, keys: Object.keys(f) })) ?? 'none');
+        diag.failedExtractions.push({ submissionId: s.id, fieldDump: allFieldsDump });
+        console.warn('[Samsara] Could not extract trailer number. Trailer field:', trailerFieldDump, 'All fields:', allFieldsDump);
       }
 
       const trailerNumber = rawTrailerNum ? normalizeTrailerNumber(rawTrailerNum) : `UNKNOWN-${s.id.slice(0, 6).toUpperCase()}`;
+      diag.extractedTrailers.push(`${trailerNumber} (raw: "${rawTrailerNum || 'EMPTY'}")`);
+
       const event = templateId === DROP_TEMPLATE_UUID ? 'DROP' : 'PICK';
       const defectRaw = extractField(s.fields, s.inputs, 'damage') || extractField(s.fields, s.inputs, 'defect');
       const defectMatch = VALID_DEFECT_LEVELS.find(v => v.toLowerCase() === defectRaw.toLowerCase());
       const defectLevel: SamsaraFormSubmission['defectLevel'] = defectMatch ?? 'No';
 
-      // Driver name: look up from driver map by ID, fall back to submittedBy.name / mock driver.name
       const driverName = (s.submittedBy?.id && driverMap.get(s.submittedBy.id)) || s.submittedBy?.name || s.driver?.name || extractField(s.fields, s.inputs, "Submitter's Name") || 'Unknown Driver';
 
       const rawCoords = extractLatLng(s.location);
@@ -561,7 +578,6 @@ async function syncSamsara() {
 
     hasNext = body.pagination.hasNextPage;
     if (hasNext && body.pagination.endCursor) {
-      // Within-sync cursor: same startTime, just advance the page
       url.searchParams.set('after', body.pagination.endCursor);
     }
   }
@@ -582,25 +598,42 @@ async function syncSamsara() {
     if (uniqueNew.length > 0) setSubmissions([...allSubs, ...uniqueNew]);
   }
 
-  // Advance the sync window; next sync will start from now (minus a small overlap)
+  // Advance the sync window
   if (!useMock) {
-    const overlapMs = 5 * 60 * 1000; // 5-minute overlap to catch late-indexed submissions
+    const overlapMs = 5 * 60 * 1000;
     localStorage.setItem(STORAGE_KEY_LAST_SYNC, new Date(Date.now() - overlapMs).toISOString());
   }
 
-  return newSubmissions.length;
+  return { count: newSubmissions.length, diagnostics: diag };
 }
 
 export const triggerSamsaraSync = async (): Promise<{ success: boolean; message: string }> => {
   try {
-    const count = await syncSamsara();
+    const { count, diagnostics: d } = await syncSamsara();
     const logs = getLogs();
+
+    // Build diagnostic summary for the log
+    const diagParts = [
+      `API returned ${d.totalApiRecords} records (${d.matchedTemplates} matched templates, ${d.skippedTemplates} skipped).`,
+      d.usedMock ? '⚠ Used MOCK data (API unreachable).' : `startTime: ${d.startTime}`,
+    ];
+    if (d.extractedTrailers.length > 0) {
+      diagParts.push(`Trailers: ${d.extractedTrailers.join(', ')}`);
+    }
+    if (d.failedExtractions.length > 0) {
+      diagParts.push(`⚠ ${d.failedExtractions.length} failed extraction(s):`);
+      d.failedExtractions.forEach(f => {
+        diagParts.push(`  ID ${f.submissionId.slice(0, 8)}… → ${f.fieldDump}`);
+      });
+    }
+    const diagMsg = diagParts.join(' | ');
+
     logs.unshift({
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       status: 'SUCCESS',
       recordsProcessed: count,
-      message: count > 0 ? `Synced ${count} new submissions.` : 'Sync complete. No new records.',
+      message: (count > 0 ? `Synced ${count} new submissions.` : 'No new records.') + ' || DIAG: ' + diagMsg,
     });
     setLogs(logs);
     return { success: true, message: `Synced ${count} records.` };
