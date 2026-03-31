@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { X, ArrowDownCircle, ArrowUpCircle, Image } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { X, ArrowDownCircle, ArrowUpCircle, Image, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getTrailerHistory } from '../services/backendService';
 import { SamsaraFormSubmission, TrailerStatus } from '../types';
 
@@ -10,10 +10,43 @@ interface Props {
 
 export default function TrailerHistoryModal({ trailer, onClose }: Props) {
   const [history, setHistory] = useState<SamsaraFormSubmission[]>([]);
+  const [lightboxPhotos, setLightboxPhotos] = useState<string[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
 
   useEffect(() => {
     setHistory(getTrailerHistory(trailer.id, 10));
   }, [trailer.id]);
+
+  const openLightbox = useCallback((photos: string[], index: number) => {
+    setLightboxPhotos(photos);
+    setLightboxIndex(index);
+  }, []);
+
+  const closeLightbox = useCallback(() => {
+    setLightboxPhotos([]);
+    setLightboxIndex(0);
+  }, []);
+
+  const navigateLightbox = useCallback((dir: -1 | 1) => {
+    setLightboxIndex(prev => {
+      const next = prev + dir;
+      if (next < 0) return lightboxPhotos.length - 1;
+      if (next >= lightboxPhotos.length) return 0;
+      return next;
+    });
+  }, [lightboxPhotos.length]);
+
+  // Keyboard navigation for lightbox
+  useEffect(() => {
+    if (lightboxPhotos.length === 0) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowLeft') navigateLightbox(-1);
+      if (e.key === 'ArrowRight') navigateLightbox(1);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [lightboxPhotos.length, closeLightbox, navigateLightbox]);
 
   // Close on backdrop click
   const handleBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -91,20 +124,37 @@ export default function TrailerHistoryModal({ trailer, onClose }: Props) {
                     </div>
                   )}
 
-                  {/* Photo links */}
+                  {event.accessoryNotes && (
+                    <div className="mt-1.5 text-xs text-slate-500">
+                      <span className="font-medium text-slate-600">Accessories:</span> {event.accessoryNotes}
+                    </div>
+                  )}
+
+                  {/* Photo thumbnails */}
                   {event.photoUrls && event.photoUrls.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <div className="mt-2 grid grid-cols-4 gap-2">
                       {event.photoUrls.map((url, i) => (
-                        <a
+                        <div
                           key={i}
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs text-slate-600 transition-colors"
+                          className="relative aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition-opacity bg-slate-100"
+                          onClick={() => openLightbox(event.photoUrls!, i)}
                         >
-                          <Image size={12} />
-                          Photo {i + 1}
-                        </a>
+                          <img
+                            src={url}
+                            alt={`Photo ${i + 1}`}
+                            loading="lazy"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              target.style.display = 'none';
+                              target.parentElement!.classList.add('flex', 'items-center', 'justify-center');
+                              const fallback = document.createElement('div');
+                              fallback.className = 'flex flex-col items-center gap-1 text-slate-400';
+                              fallback.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg><span class="text-[10px]">Photo ${i + 1}</span>`;
+                              target.parentElement!.appendChild(fallback);
+                            }}
+                          />
+                        </div>
                       ))}
                     </div>
                   )}
@@ -114,6 +164,54 @@ export default function TrailerHistoryModal({ trailer, onClose }: Props) {
           )}
         </div>
       </div>
+
+      {/* Lightbox */}
+      {lightboxPhotos.length > 0 && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center"
+          onClick={(e) => { if (e.target === e.currentTarget) closeLightbox(); }}
+        >
+          {/* Close button */}
+          <button
+            onClick={closeLightbox}
+            className="absolute top-4 right-4 text-white/70 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors z-10"
+          >
+            <X size={28} />
+          </button>
+
+          {/* Navigation arrows */}
+          {lightboxPhotos.length > 1 && (
+            <>
+              <button
+                onClick={() => navigateLightbox(-1)}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors z-10"
+              >
+                <ChevronLeft size={36} />
+              </button>
+              <button
+                onClick={() => navigateLightbox(1)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors z-10"
+              >
+                <ChevronRight size={36} />
+              </button>
+            </>
+          )}
+
+          {/* Image */}
+          <img
+            src={lightboxPhotos[lightboxIndex]}
+            alt={`Photo ${lightboxIndex + 1}`}
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg"
+          />
+
+          {/* Counter */}
+          {lightboxPhotos.length > 1 && (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-white/80 text-sm bg-black/50 px-3 py-1 rounded-full">
+              {lightboxIndex + 1} / {lightboxPhotos.length}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

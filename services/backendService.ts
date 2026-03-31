@@ -336,6 +336,7 @@ const deriveOpenTrailers = (subs: SamsaraFormSubmission[]): TrailerStatus[] => {
       notes: lastDrop.notes ?? '',
       defectLevel: lastDrop.defectLevel ?? 'No',
       defectNotes: lastDrop.defectNotes ?? '',
+      accessoryNotes: lastDrop.accessoryNotes ?? '',
       photoUrls: lastDrop.photoUrls ?? [],
     });
   }

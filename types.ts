@@ -16,6 +16,7 @@ export interface TrailerStatus {
   // Extended fields from Samsara form
   defectLevel?: 'No' | 'Yes (minor)' | 'Yes (needs attention)';
   defectNotes?: string;
+  accessoryNotes?: string;
   photoUrls?: string[];
 }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, AlertTriangle, Clock, Truck, RefreshCw, X, Maximize2 } from 'lucide-react';
+import { Search, AlertTriangle, Clock, Truck, RefreshCw, X, Maximize2, Camera } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { getTrailers, getNewEventsForOwnerNotifications, markOwnerNotified } from '../services/backendService';
 import { TrailerStatus, SamsaraFormSubmission } from '../types';
@@ -230,11 +230,18 @@ const OwnerDashboard: React.FC<Props> = ({ onFullScreen }) => {
                         <p className="text-sm text-slate-500">{trailer.location}</p>
                         <div className="flex justify-between items-center mt-2">
                           <span className="text-xs text-slate-400">By: {trailer.droppedBy}</span>
-                          {trailer.defectLevel && trailer.defectLevel !== 'No' && (
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${DEFECT_STYLE[trailer.defectLevel]}`}>
-                              {trailer.defectLevel}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {trailer.photoUrls && trailer.photoUrls.length > 0 && (
+                              <span className="flex items-center gap-1 text-xs text-slate-400">
+                                <Camera size={12} /> {trailer.photoUrls.length}
+                              </span>
+                            )}
+                            {trailer.defectLevel && trailer.defectLevel !== 'No' && (
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${DEFECT_STYLE[trailer.defectLevel]}`}>
+                                {trailer.defectLevel}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -249,6 +256,7 @@ const OwnerDashboard: React.FC<Props> = ({ onFullScreen }) => {
                       <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Location</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Defect</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Driver</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Photos</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Dropped At</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Age</th>
                     </tr>
@@ -275,6 +283,16 @@ const OwnerDashboard: React.FC<Props> = ({ onFullScreen }) => {
                             )}
                           </td>
                           <td className="px-5 py-3 text-slate-500 text-sm">{trailer.droppedBy || '—'}</td>
+                          <td className="px-5 py-3">
+                            {trailer.photoUrls && trailer.photoUrls.length > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-slate-500 hover:text-blue-600 transition-colors">
+                                <Camera size={14} />
+                                <span className="text-xs font-medium">{trailer.photoUrls.length}</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 text-xs">—</span>
+                            )}
+                          </td>
                           <td className="px-5 py-3 text-slate-400 text-sm whitespace-nowrap">
                             {new Date(trailer.lastUpdated).toLocaleString()}
                           </td>
