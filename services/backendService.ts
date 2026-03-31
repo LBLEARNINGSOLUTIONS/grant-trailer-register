@@ -10,6 +10,7 @@ interface SamsaraRawField {
   stringValue?: string;
   numberValue?: { value?: number };
   multipleChoiceValue?: { selected?: string[] };
+  checkBoxValue?: { selected?: string[] };
   mediaValue?: { mediaList?: { id: string; url: string; processingStatus?: string }[] };
   assetValue?: { id?: string; name?: string; serial?: string };
 }
@@ -74,8 +75,9 @@ function extractField(fields: SamsaraRawField[] | undefined, inputs: { label: st
       }
       if (match.numberValue?.value != null) return String(match.numberValue.value);
       if (match.multipleChoiceValue?.selected?.length) return match.multipleChoiceValue.selected.join(', ');
+      if (match.checkBoxValue?.selected?.length) return match.checkBoxValue.selected.join(', ');
       // Catch-all: Samsara may use keys we haven't mapped
-      const known = new Set(['id', 'label', 'type', 'stringValue', 'numberValue', 'multipleChoiceValue', 'mediaValue', 'assetValue']);
+      const known = new Set(['id', 'label', 'type', 'stringValue', 'numberValue', 'multipleChoiceValue', 'checkBoxValue', 'mediaValue', 'assetValue']);
       for (const [key, val] of Object.entries(match)) {
         if (known.has(key)) continue;
         if (typeof val === 'string' && val) return val;
@@ -618,7 +620,10 @@ async function syncSamsara(): Promise<{ count: number; diagnostics: SyncDiagnost
         gpsAddress: extractField(s.fields, s.inputs, 'Location Address') || extractField(s.fields, s.inputs, 'GPS Location'),
         defectLevel,
         defectNotes: extractField(s.fields, s.inputs, 'If yes, please specify'),
-        accessoryNotes: extractField(s.fields, s.inputs, 'Accessories present on trailer') || extractField(s.fields, s.inputs, 'Accessories left with trailer'),
+        accessoryNotes: [
+          extractField(s.fields, s.inputs, 'Accessories left with trailer') || extractField(s.fields, s.inputs, 'Accessories present on trailer'),
+          extractField(s.fields, s.inputs, 'Other'),
+        ].filter(Boolean).join('; '),
         photoUrls: extractFieldPhotos(s.fields, s.media),
         rawLat: rawCoords?.lat,
         rawLng: rawCoords?.lng,
